@@ -4,3 +4,20 @@ dist/
 vite.config.js
 vite.config.d.ts
 .DS_Store
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pkey
+*.secret
+secrets/
+
+# Contract/deployment outputs that may include local metadata
+broadcast/
+cache/
+out/
+deployments/local/
+.deployer
