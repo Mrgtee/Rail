@@ -23,3 +23,6 @@ cache/
 out/
 deployments/local/
 .deployer
+contracts/build/
+contracts/out/
+contracts/cache/
