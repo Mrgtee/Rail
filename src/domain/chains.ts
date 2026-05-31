@@ -1,5 +1,8 @@
 import type { SupportedChain } from "./types";
 
+export const ROBINHOOD_PUBLIC_RPC_URL = "https://rpc.testnet.chain.robinhood.com";
+export const ARBITRUM_SEPOLIA_PUBLIC_RPC_URL = "https://sepolia-rollup.arbitrum.io/rpc";
+
 export const ROBINHOOD_CHAIN_TESTNET = {
   id: 46630,
   name: "Robinhood Chain Testnet",
@@ -23,4 +26,18 @@ export const primaryChain = ROBINHOOD_CHAIN_TESTNET;
 
 export function getSupportedChainName(chainId?: number) {
   return supportedChains.find((chain) => chain.id === chainId)?.name ?? "Unsupported network";
+}
+
+export function isSupportedChain(chainId?: number) {
+  return supportedChains.some((chain) => chain.id === chainId);
+}
+
+export function explorerAddressUrl(address?: string, chainId: number = primaryChain.id) {
+  const explorer = supportedChains.find((chain) => chain.id === chainId)?.explorerUrl ?? primaryChain.explorerUrl;
+  return address ? `${explorer}/address/${address}` : explorer;
+}
+
+export function explorerTxUrl(txHash?: string, chainId: number = primaryChain.id) {
+  const explorer = supportedChains.find((chain) => chain.id === chainId)?.explorerUrl ?? primaryChain.explorerUrl;
+  return txHash ? `${explorer}/tx/${txHash}` : explorer;
 }

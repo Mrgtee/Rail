@@ -16,11 +16,14 @@ import {
   wrongNetworkAccount,
 } from "../domain/mockRail";
 import type { ActivityEvent, AppStage, PolicyDraft, UserAccount } from "../domain/types";
+import { useRailWallet } from "../wallet/useRailWallet";
 
 export function RailApp() {
   const appRef = useRef<HTMLDivElement>(null);
+  const railWallet = useRailWallet();
   const [stage, setStage] = useState<AppStage>("landing");
   const [account, setAccount] = useState<UserAccount>(disconnectedAccount);
+  const [isDemoWallet, setIsDemoWallet] = useState(true);
   const [goal, setGoal] = useState(defaultGoal);
   const [policy, setPolicy] = useState<PolicyDraft | null>(null);
   const [draftingStep, setDraftingStep] = useState(0);
@@ -46,18 +49,41 @@ export function RailApp() {
   const handleConnectWallet = () => {
     setAccount({ ...disconnectedAccount, status: "connecting" });
 
-    window.setTimeout(() => {
-      setAccount(demoAccount);
-      moveToApp("goal");
-    }, 650);
+    void railWallet
+      .connect()
+      .then(() => {
+        setIsDemoWallet(false);
+      })
+      .catch(() => {
+        setIsDemoWallet(true);
+        window.setTimeout(() => {
+          setAccount(demoAccount);
+          moveToApp("goal");
+        }, 450);
+      });
   };
 
   const handleConnectWrongNetwork = () => {
+    setIsDemoWallet(true);
     setAccount(wrongNetworkAccount);
   };
 
   const handleSwitchNetwork = () => {
-    setAccount({ ...wrongNetworkAccount, status: "connecting" });
+    setAccount((current) => ({ ...current, status: "connecting" }));
+
+    if (!isDemoWallet) {
+      void railWallet
+        .switchToPrimaryChain()
+        .then(() => {
+          moveToApp("goal");
+        })
+        .catch(() => {
+          setIsDemoWallet(true);
+          setAccount(demoAccount);
+          moveToApp("goal");
+        });
+      return;
+    }
 
     window.setTimeout(() => {
       setAccount(demoAccount);
@@ -95,6 +121,22 @@ export function RailApp() {
       }),
     );
   };
+
+
+  useEffect(() => {
+    if (isDemoWallet) {
+      return;
+    }
+
+    setAccount((current) => ({
+      ...railWallet.account,
+      vaultBalanceUSDC: current.vaultBalanceUSDC || demoAccount.vaultBalanceUSDC,
+    }));
+
+    if (railWallet.account.status === "connected" && stage === "connect") {
+      moveToApp("goal");
+    }
+  }, [isDemoWallet, railWallet.account.address, railWallet.account.chainId, railWallet.account.status, stage]);
 
   useEffect(() => {
     if (stage !== "drafting") {
@@ -186,6 +228,8 @@ export function RailApp() {
               onLaunch={() => moveToApp("connect")}
               onPause={() => updatePolicyStatus("paused", "Automation paused", "Agent execution is stopped until the user resumes.")}
               onReset={() => {
+                railWallet.disconnect();
+                setIsDemoWallet(true);
                 setAccount(disconnectedAccount);
                 setPolicy(null);
                 setActivity([]);

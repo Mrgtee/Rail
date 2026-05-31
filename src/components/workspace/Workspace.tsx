@@ -16,9 +16,9 @@ import {
 } from "lucide-react";
 import { AnimatePresence } from "framer-motion";
 import { useMemo, useState } from "react";
-import { primaryChain } from "../../domain/chains";
+import { explorerAddressUrl, explorerTxUrl, primaryChain } from "../../domain/chains";
 import { activationSteps, draftingSteps, simulateAgentActivity } from "../../domain/mockRail";
-import { formatSlippage, formatUSDC, policyFields } from "../../domain/formatters";
+import { formatSlippage, formatUSDC, policyFields, shortAddress } from "../../domain/formatters";
 import type { ActivityEvent, AppStage, PolicyDraft, UserAccount } from "../../domain/types";
 import {
   ActivityCard,
@@ -91,7 +91,7 @@ export function ProductWorkspace({
         <div className="flex flex-wrap items-center gap-2">
           <StatusPill label={`${primaryChain.name} · ${primaryChain.id}`} tone="blue" />
           <StatusPill label="Demo mode" tone="amber" />
-          {account.status === "connected" ? <StatusPill label="Wallet connected" tone="green" /> : null}
+          {account.status === "connected" ? <StatusPill label={`Wallet ${shortAddress(account.address)}`} tone="green" /> : null}
           {account.status === "wrong-network" ? <StatusPill label="Wrong network" tone="red" /> : null}
         </div>
       </div>
@@ -178,8 +178,13 @@ function ConnectScreen({ account, onConnect, onConnectWrongNetwork, onSwitchNetw
             <WalletCards size={24} />
           </div>
           <p className="mt-6 text-lg leading-8 text-rail-secondary">
-            Your funds stay controlled by smart contract rules. This checkpoint still uses demo wallet state; real wallet connectors land in the next stop.
+            Your funds stay controlled by smart contract rules. Rail tries an injected wallet first and falls back to a demo wallet when no browser wallet is available.
           </p>
+          {account.address ? (
+            <a className="mt-5 block font-mono text-sm text-rail-blue hover:text-rail-text" href={explorerAddressUrl(account.address, account.chainId)} rel="noreferrer" target="_blank">
+              {shortAddress(account.address)} · {account.ethBalance?.toFixed(4) ?? "0.0000"} ETH
+            </a>
+          ) : null}
           {isWrongNetwork ? (
             <div className="mt-6 rounded-lg border border-rail-red/40 bg-rail-red/10 p-4 text-sm text-rail-text">
               <div className="flex items-center gap-2 font-semibold text-rail-red">
@@ -198,7 +203,12 @@ function ConnectScreen({ account, onConnect, onConnectWrongNetwork, onSwitchNetw
             >
               {isConnecting ? "Connecting..." : "Connect Demo Wallet"}
             </RailButton>
-            {isWrongNetwork ? (
+            {account.address ? (
+            <a className="mt-5 block font-mono text-sm text-rail-blue hover:text-rail-text" href={explorerAddressUrl(account.address, account.chainId)} rel="noreferrer" target="_blank">
+              {shortAddress(account.address)} · {account.ethBalance?.toFixed(4) ?? "0.0000"} ETH
+            </a>
+          ) : null}
+          {isWrongNetwork ? (
               <button
                 className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-5 text-sm font-semibold text-rail-text transition hover:border-rail-blue"
                 onClick={onSwitchNetwork}
@@ -565,6 +575,11 @@ function ActivityDetail({ event, onClose }: ActivityDetailProps) {
           <ProofLine label="Rule checked" value={event.rule} />
           <ProofLine label="Simulation" value={event.simulationResult} />
           <ProofLine label="Transaction status" value={event.transaction.status} />
+          {event.transaction.hash ? (
+            <a className="font-mono text-sm text-rail-blue hover:text-rail-text" href={explorerTxUrl(event.transaction.hash, event.transaction.chainId)} rel="noreferrer" target="_blank">
+              View transaction
+            </a>
+          ) : null}
           <ProofLine label="Funds moved" value={event.fundsMoved} />
           <ProofLine label="Reason" value={event.reason} />
         </div>

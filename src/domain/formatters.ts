@@ -25,3 +25,7 @@ export function policyFields(policy: PolicyDraft) {
     { label: "Agent permission", value: policy.agentPermission },
   ];
 }
+
+export function shortAddress(address?: string) {
+  return address ? `${address.slice(0, 6)}...${address.slice(-4)}` : "Not connected";
+}
