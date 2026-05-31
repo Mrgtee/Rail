@@ -1,6 +1,8 @@
 node_modules/
 dist/
+server/dist/
 *.tsbuildinfo
+.cache/
 vite.config.js
 vite.config.d.ts
 .DS_Store
