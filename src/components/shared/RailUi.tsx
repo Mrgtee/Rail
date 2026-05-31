@@ -1,7 +1,6 @@
 import { BadgeCheck, Ban, CheckCircle2, Clock3 } from "lucide-react";
 import { motion } from "framer-motion";
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
-import type { ActivityEvent } from "../../domain/types";
 
 export const entrance = {
   hidden: { opacity: 0, y: 18 },
@@ -128,12 +127,25 @@ export function Metric({ icon, label, value }: MetricProps) {
   );
 }
 
-interface ActivityCardProps {
-  event: ActivityEvent;
-  featured?: boolean;
+export interface ActivityCardEvent {
+  id?: string;
+  kind: "executed" | "blocked" | "pending" | "review-needed" | "failed";
+  title: string;
+  attempted: string;
+  reason: string;
+  rule: string;
+  fundsMoved: string;
+  timestamp: string;
+  txHash?: string;
 }
 
-export function ActivityCard({ event, featured = false }: ActivityCardProps) {
+interface ActivityCardProps {
+  event: ActivityCardEvent;
+  featured?: boolean;
+  onClick?: () => void;
+}
+
+export function ActivityCard({ event, featured = false, onClick }: ActivityCardProps) {
   const isBlocked = event.kind === "blocked";
   const isExecuted = event.kind === "executed";
   const tone = isBlocked
@@ -145,7 +157,8 @@ export function ActivityCard({ event, featured = false }: ActivityCardProps) {
   return (
     <motion.article
       whileHover={{ y: featured ? -3 : -2 }}
-      className={`rounded-lg border p-5 ${tone} ${featured ? "shadow-[0_0_60px_rgba(255,90,102,0.14)]" : ""}`}
+      className={`rounded-lg border p-5 ${tone} ${onClick ? "cursor-pointer" : ""} ${featured ? "shadow-[0_0_60px_rgba(255,90,102,0.14)]" : ""}`}
+      onClick={onClick}
     >
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
         <div>

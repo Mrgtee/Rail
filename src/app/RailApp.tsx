@@ -4,19 +4,23 @@ import { ProductWorkspace } from "../components/workspace/Workspace";
 import {
   activatePolicy,
   activationSteps,
+  createLocalActivity,
   defaultGoal,
+  demoAccount,
+  disconnectedAccount,
   draftingSteps,
   generatePolicy,
   samplePolicy,
   signPolicy,
   simulateAgentActivity,
+  wrongNetworkAccount,
 } from "../domain/mockRail";
-import type { ActivityEvent, AppStage, PolicyDraft, WalletState } from "../domain/types";
+import type { ActivityEvent, AppStage, PolicyDraft, UserAccount } from "../domain/types";
 
 export function RailApp() {
   const appRef = useRef<HTMLDivElement>(null);
   const [stage, setStage] = useState<AppStage>("landing");
-  const [wallet, setWallet] = useState<WalletState>("disconnected");
+  const [account, setAccount] = useState<UserAccount>(disconnectedAccount);
   const [goal, setGoal] = useState(defaultGoal);
   const [policy, setPolicy] = useState<PolicyDraft | null>(null);
   const [draftingStep, setDraftingStep] = useState(0);
@@ -35,13 +39,30 @@ export function RailApp() {
     }, 60);
   };
 
+  const pushActivity = (event: ActivityEvent) => {
+    setActivity((current) => [event, ...current]);
+  };
+
   const handleConnectWallet = () => {
-    setWallet("connecting");
+    setAccount({ ...disconnectedAccount, status: "connecting" });
 
     window.setTimeout(() => {
-      setWallet("connected");
+      setAccount(demoAccount);
       moveToApp("goal");
     }, 650);
+  };
+
+  const handleConnectWrongNetwork = () => {
+    setAccount(wrongNetworkAccount);
+  };
+
+  const handleSwitchNetwork = () => {
+    setAccount({ ...wrongNetworkAccount, status: "connecting" });
+
+    window.setTimeout(() => {
+      setAccount(demoAccount);
+      moveToApp("goal");
+    }, 500);
   };
 
   const handleGeneratePolicy = () => {
@@ -58,6 +79,23 @@ export function RailApp() {
     moveToApp("activating");
   };
 
+  const updatePolicyStatus = (status: PolicyDraft["status"], title: string, reason: string) => {
+    const updatedPolicy = { ...activePolicy, status, updatedAt: new Date().toISOString() };
+    setPolicy(updatedPolicy);
+    pushActivity(
+      createLocalActivity({
+        kind: status === "revoked" ? "blocked" : "review-needed",
+        policyId: updatedPolicy.id,
+        title,
+        attempted: `${updatedPolicy.strategy} policy status update`,
+        reason,
+        rule: "User confirmation",
+        fundsMoved: "0 USDC",
+        actionType: "policy-update",
+      }),
+    );
+  };
+
   useEffect(() => {
     if (stage !== "drafting") {
       return;
@@ -70,7 +108,7 @@ export function RailApp() {
     );
 
     const finishTimer = window.setTimeout(() => {
-      void generatePolicy(goal).then((draft) => {
+      void generatePolicy(goal, account.address).then((draft) => {
         setPolicy(draft);
         moveToApp("review");
       });
@@ -80,7 +118,7 @@ export function RailApp() {
       timers.forEach(window.clearTimeout);
       window.clearTimeout(finishTimer);
     };
-  }, [goal, stage]);
+  }, [account.address, goal, stage]);
 
   useEffect(() => {
     if (stage !== "activating") {
@@ -122,26 +160,59 @@ export function RailApp() {
         >
           <div className="mx-auto max-w-7xl">
             <ProductWorkspace
+              account={account}
               activity={activity}
               activationStep={activationStep}
               draftingStep={draftingStep}
               goal={goal}
               onConnect={handleConnectWallet}
+              onConnectWrongNetwork={handleConnectWrongNetwork}
+              onDeposit={(amount) => {
+                setAccount((current) => ({ ...current, vaultBalanceUSDC: current.vaultBalanceUSDC + amount }));
+                pushActivity(
+                  createLocalActivity({
+                    kind: "executed",
+                    title: `Deposited ${amount} USDC`,
+                    attempted: "Deposit funds into PolicyVault",
+                    reason: "Vault balance updated in demo mode.",
+                    rule: "User-confirmed deposit",
+                    fundsMoved: `${amount} USDC`,
+                    actionType: "deposit",
+                  }),
+                );
+              }}
               onGeneratePolicy={handleGeneratePolicy}
               onGoalChange={setGoal}
               onLaunch={() => moveToApp("connect")}
-              onPause={() => setPolicy({ ...activePolicy, status: "paused" })}
+              onPause={() => updatePolicyStatus("paused", "Automation paused", "Agent execution is stopped until the user resumes.")}
               onReset={() => {
-                setWallet("disconnected");
+                setAccount(disconnectedAccount);
                 setPolicy(null);
                 setActivity([]);
                 setGoal(defaultGoal);
                 moveToApp("connect");
               }}
+              onResume={() => updatePolicyStatus("active", "Automation resumed", "Agent execution can continue inside the approved policy.")}
+              onRevoke={() => updatePolicyStatus("revoked", "Policy revoked", "Future agent actions are disabled for this policy.")}
               onSign={handleSignPolicy}
+              onSwitchNetwork={handleSwitchNetwork}
+              onUpdatePolicy={setPolicy}
+              onWithdraw={(amount) => {
+                setAccount((current) => ({ ...current, vaultBalanceUSDC: Math.max(0, current.vaultBalanceUSDC - amount) }));
+                pushActivity(
+                  createLocalActivity({
+                    kind: "executed",
+                    title: `Withdrew ${amount} USDC`,
+                    attempted: "Withdraw funds from PolicyVault",
+                    reason: "User withdrawal completed in demo mode.",
+                    rule: "Owner-only withdrawal",
+                    fundsMoved: `${amount} USDC`,
+                    actionType: "withdraw",
+                  }),
+                );
+              }}
               policy={activePolicy}
               stage={stage}
-              wallet={wallet}
             />
           </div>
         </section>

@@ -7,18 +7,25 @@ import {
   LockKeyhole,
   PauseCircle,
   Play,
+  RefreshCcw,
+  RotateCcw,
+  ShieldAlert,
   WalletCards,
+  X,
   Zap,
 } from "lucide-react";
 import { AnimatePresence } from "framer-motion";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { primaryChain } from "../../domain/chains";
 import { activationSteps, draftingSteps, simulateAgentActivity } from "../../domain/mockRail";
-import type { ActivityEvent, AppStage, PolicyDraft, WalletState } from "../../domain/types";
+import { formatSlippage, formatUSDC, policyFields } from "../../domain/formatters";
+import type { ActivityEvent, AppStage, PolicyDraft, UserAccount } from "../../domain/types";
 import {
   ActivityCard,
   Metric,
   MiniProof,
   PolicyField,
+  ProofLine,
   RailButton,
   ScreenFrame,
   StatusPill,
@@ -27,64 +34,52 @@ import {
 
 const chips = ["DCA weekly", "Keep reserve", "Set slippage limit", "Stop after date"];
 
-const policyFields: Array<{
-  key: keyof Pick<
-    PolicyDraft,
-    | "strategy"
-    | "spendPerExecution"
-    | "frequency"
-    | "monthlyCap"
-    | "allowedAssets"
-    | "slippageLimit"
-    | "minimumReserve"
-    | "expiry"
-    | "agentPermission"
-  >;
-  label: string;
-}> = [
-  { key: "strategy", label: "Strategy" },
-  { key: "spendPerExecution", label: "Spend" },
-  { key: "frequency", label: "Frequency" },
-  { key: "monthlyCap", label: "Monthly cap" },
-  { key: "allowedAssets", label: "Allowed assets" },
-  { key: "slippageLimit", label: "Slippage limit" },
-  { key: "minimumReserve", label: "Minimum reserve" },
-  { key: "expiry", label: "Expiry" },
-  { key: "agentPermission", label: "Agent permission" },
-];
-
 interface ProductWorkspaceProps {
+  account: UserAccount;
   activity: ActivityEvent[];
   activationStep: number;
   draftingStep: number;
   goal: string;
   onConnect: () => void;
+  onConnectWrongNetwork: () => void;
+  onDeposit: (amount: number) => void;
   onGeneratePolicy: () => void;
   onGoalChange: (goal: string) => void;
   onLaunch: () => void;
   onPause: () => void;
   onReset: () => void;
+  onResume: () => void;
+  onRevoke: () => void;
   onSign: () => void;
+  onSwitchNetwork: () => void;
+  onUpdatePolicy: (policy: PolicyDraft) => void;
+  onWithdraw: (amount: number) => void;
   policy: PolicyDraft;
   stage: AppStage;
-  wallet: WalletState;
 }
 
 export function ProductWorkspace({
+  account,
   activity,
   activationStep,
   draftingStep,
   goal,
   onConnect,
+  onConnectWrongNetwork,
+  onDeposit,
   onGeneratePolicy,
   onGoalChange,
   onLaunch,
   onPause,
   onReset,
+  onResume,
+  onRevoke,
   onSign,
+  onSwitchNetwork,
+  onUpdatePolicy,
+  onWithdraw,
   policy,
   stage,
-  wallet,
 }: ProductWorkspaceProps) {
   return (
     <div className="rounded-lg border border-rail-border bg-rail-graphite shadow-glow">
@@ -94,9 +89,10 @@ export function ProductWorkspace({
           <h2 className="mt-2 text-2xl font-semibold text-rail-text">Policy automation workspace</h2>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <StatusPill label="Robinhood Chain Testnet" tone="blue" />
-          <StatusPill label="Testnet only" tone="amber" />
-          {wallet === "connected" ? <StatusPill label="Wallet connected" tone="green" /> : null}
+          <StatusPill label={`${primaryChain.name} · ${primaryChain.id}`} tone="blue" />
+          <StatusPill label="Demo mode" tone="amber" />
+          {account.status === "connected" ? <StatusPill label="Wallet connected" tone="green" /> : null}
+          {account.status === "wrong-network" ? <StatusPill label="Wrong network" tone="red" /> : null}
         </div>
       </div>
       <div className="grid min-h-[720px] lg:grid-cols-[260px_1fr]">
@@ -106,15 +102,36 @@ export function ProductWorkspace({
         <div className="p-5 sm:p-8">
           <AnimatePresence mode="wait">
             {stage === "landing" ? <WelcomePanel key="welcome" onLaunch={onLaunch} /> : null}
-            {stage === "connect" ? <ConnectScreen key="connect" onConnect={onConnect} wallet={wallet} /> : null}
+            {stage === "connect" ? (
+              <ConnectScreen
+                key="connect"
+                account={account}
+                onConnect={onConnect}
+                onConnectWrongNetwork={onConnectWrongNetwork}
+                onSwitchNetwork={onSwitchNetwork}
+              />
+            ) : null}
             {stage === "goal" ? (
               <GoalScreen key="goal" goal={goal} onGeneratePolicy={onGeneratePolicy} onGoalChange={onGoalChange} />
             ) : null}
             {stage === "drafting" ? <DraftingScreen key="drafting" activeStep={draftingStep} /> : null}
-            {stage === "review" ? <PolicyReviewScreen key="review" onSign={onSign} policy={policy} /> : null}
+            {stage === "review" ? (
+              <PolicyReviewScreen key="review" onSign={onSign} onUpdatePolicy={onUpdatePolicy} policy={policy} />
+            ) : null}
             {stage === "activating" ? <ActivationScreen key="activating" activeStep={activationStep} /> : null}
             {stage === "dashboard" ? (
-              <DashboardScreen key="dashboard" activity={activity} onPause={onPause} onReset={onReset} policy={policy} />
+              <DashboardScreen
+                key="dashboard"
+                account={account}
+                activity={activity}
+                onDeposit={onDeposit}
+                onPause={onPause}
+                onReset={onReset}
+                onResume={onResume}
+                onRevoke={onRevoke}
+                onWithdraw={onWithdraw}
+                policy={policy}
+              />
             ) : null}
           </AnimatePresence>
         </div>
@@ -143,11 +160,16 @@ function WelcomePanel({ onLaunch }: WelcomePanelProps) {
 }
 
 interface ConnectScreenProps {
+  account: UserAccount;
   onConnect: () => void;
-  wallet: WalletState;
+  onConnectWrongNetwork: () => void;
+  onSwitchNetwork: () => void;
 }
 
-function ConnectScreen({ onConnect, wallet }: ConnectScreenProps) {
+function ConnectScreen({ account, onConnect, onConnectWrongNetwork, onSwitchNetwork }: ConnectScreenProps) {
+  const isConnecting = account.status === "connecting";
+  const isWrongNetwork = account.status === "wrong-network";
+
   return (
     <ScreenFrame eyebrow="Step 1" title="Connect your wallet to create an automation policy.">
       <div className="mt-8 grid gap-6 lg:grid-cols-[0.86fr_1.14fr]">
@@ -156,17 +178,45 @@ function ConnectScreen({ onConnect, wallet }: ConnectScreenProps) {
             <WalletCards size={24} />
           </div>
           <p className="mt-6 text-lg leading-8 text-rail-secondary">
-            Your funds stay controlled by smart contract rules. This demo simulates wallet connection and testnet policy activation.
+            Your funds stay controlled by smart contract rules. This checkpoint still uses demo wallet state; real wallet connectors land in the next stop.
           </p>
-          <RailButton
-            className="mt-7"
-            disabled={wallet === "connecting"}
-            icon={wallet === "connecting" ? <Clock3 size={17} /> : <WalletCards size={17} />}
-            onClick={onConnect}
-            size="lg"
-          >
-            {wallet === "connecting" ? "Connecting..." : "Connect Wallet"}
-          </RailButton>
+          {isWrongNetwork ? (
+            <div className="mt-6 rounded-lg border border-rail-red/40 bg-rail-red/10 p-4 text-sm text-rail-text">
+              <div className="flex items-center gap-2 font-semibold text-rail-red">
+                <ShieldAlert size={16} />
+                Unsupported network
+              </div>
+              <p className="mt-2 text-rail-secondary">{account.error}</p>
+            </div>
+          ) : null}
+          <div className="mt-7 grid gap-3 sm:grid-cols-2">
+            <RailButton
+              disabled={isConnecting}
+              icon={isConnecting ? <Clock3 size={17} /> : <WalletCards size={17} />}
+              onClick={onConnect}
+              size="lg"
+            >
+              {isConnecting ? "Connecting..." : "Connect Demo Wallet"}
+            </RailButton>
+            {isWrongNetwork ? (
+              <button
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-5 text-sm font-semibold text-rail-text transition hover:border-rail-blue"
+                onClick={onSwitchNetwork}
+                type="button"
+              >
+                <RefreshCcw size={17} />
+                Switch Network
+              </button>
+            ) : (
+              <button
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-5 text-sm font-semibold text-rail-secondary transition hover:border-rail-red hover:text-rail-text"
+                onClick={onConnectWrongNetwork}
+                type="button"
+              >
+                Simulate Wrong Network
+              </button>
+            )}
+          </div>
         </div>
         <WardenPanel state="monitoring" />
       </div>
@@ -181,6 +231,8 @@ interface GoalScreenProps {
 }
 
 function GoalScreen({ goal, onGeneratePolicy, onGoalChange }: GoalScreenProps) {
+  const isEmpty = goal.trim().length < 16;
+
   return (
     <ScreenFrame eyebrow="Step 2" title="Tell Rail the job. The next screen turns it into enforceable rails.">
       <div className="mt-8 rounded-lg border border-rail-border bg-rail-panel p-5">
@@ -205,7 +257,10 @@ function GoalScreen({ goal, onGeneratePolicy, onGoalChange }: GoalScreenProps) {
             </button>
           ))}
         </div>
-        <RailButton className="mt-6" icon={<Zap size={17} />} onClick={onGeneratePolicy} size="lg">
+        {isEmpty ? (
+          <p className="mt-4 text-sm text-rail-amber">Add an amount, asset, cadence, and risk limit so Rail can create a safe policy.</p>
+        ) : null}
+        <RailButton className="mt-6" disabled={isEmpty} icon={<Zap size={17} />} onClick={onGeneratePolicy} size="lg">
           Generate Policy
         </RailButton>
       </div>
@@ -219,7 +274,7 @@ interface DraftingScreenProps {
 
 function DraftingScreen({ activeStep }: DraftingScreenProps) {
   return (
-    <ScreenFrame eyebrow="AI draft" title="Rail is translating intent into limits.">
+    <ScreenFrame eyebrow="AI draft" title="Rail is translating intent into policy JSON.">
       <div className="mt-8 grid gap-4">
         {draftingSteps.map((step, index) => {
           const isDone = index < activeStep;
@@ -250,10 +305,18 @@ function DraftingScreen({ activeStep }: DraftingScreenProps) {
 
 interface PolicyReviewScreenProps {
   onSign: () => void;
+  onUpdatePolicy: (policy: PolicyDraft) => void;
   policy: PolicyDraft;
 }
 
-function PolicyReviewScreen({ onSign, policy }: PolicyReviewScreenProps) {
+function PolicyReviewScreen({ onSign, onUpdatePolicy, policy }: PolicyReviewScreenProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  const fields = policyFields(policy);
+
+  const updateNumber = (key: keyof Pick<PolicyDraft, "spendPerExecutionUSDC" | "monthlyCapUSDC" | "minimumReserveUSDC" | "expiryDays">, value: string) => {
+    onUpdatePolicy({ ...policy, [key]: Number(value), updatedAt: new Date().toISOString() });
+  };
+
   return (
     <ScreenFrame eyebrow="Step 3" title="Review the policy before signing.">
       <div className="mt-8 grid gap-6 xl:grid-cols-[1.12fr_0.88fr]">
@@ -261,17 +324,39 @@ function PolicyReviewScreen({ onSign, policy }: PolicyReviewScreenProps) {
           <div className="flex flex-col justify-between gap-3 border-b border-rail-border pb-5 sm:flex-row sm:items-center">
             <div>
               <p className="text-sm font-semibold text-rail-secondary">Policy Summary</p>
-              <h3 className="mt-1 text-2xl font-semibold text-rail-text">Weekly DCA guardrails</h3>
+              <h3 className="mt-1 text-2xl font-semibold text-rail-text">{policy.summary}</h3>
             </div>
-            <StatusPill label="Awaiting signature" tone="amber" />
+            <StatusPill label={policy.status === "awaiting-signature" ? "Awaiting signature" : policy.status} tone="amber" />
           </div>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            {policyFields.map((field) => (
-              <PolicyField key={field.key} label={field.label} value={policy[field.key]} />
-            ))}
-          </div>
+          {isEditing ? (
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <PolicyInput label="Spend per execution" value={policy.spendPerExecutionUSDC} onChange={(value) => updateNumber("spendPerExecutionUSDC", value)} />
+              <PolicyInput label="Monthly cap" value={policy.monthlyCapUSDC} onChange={(value) => updateNumber("monthlyCapUSDC", value)} />
+              <PolicyInput label="Minimum reserve" value={policy.minimumReserveUSDC} onChange={(value) => updateNumber("minimumReserveUSDC", value)} />
+              <PolicyInput label="Expiry days" value={policy.expiryDays} onChange={(value) => updateNumber("expiryDays", value)} />
+              <PolicyInput label="Slippage %" value={policy.slippageBps / 100} onChange={(value) => onUpdatePolicy({ ...policy, slippageBps: Number(value) * 100, updatedAt: new Date().toISOString() })} />
+              <label className="grid gap-2 text-sm font-semibold text-rail-secondary">
+                Frequency
+                <select
+                  className="min-h-12 rounded-lg border border-rail-border bg-rail-black px-3 text-rail-text outline-none focus:border-rail-green"
+                  onChange={(event) => onUpdatePolicy({ ...policy, frequency: event.target.value as PolicyDraft["frequency"], updatedAt: new Date().toISOString() })}
+                  value={policy.frequency}
+                >
+                  <option>Daily</option>
+                  <option>Weekly</option>
+                  <option>Monthly</option>
+                </select>
+              </label>
+            </div>
+          ) : (
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              {fields.map((field) => (
+                <PolicyField key={field.label} label={field.label} value={field.value} />
+              ))}
+            </div>
+          )}
           <div className="mt-5 rounded-lg border border-rail-green/30 bg-rail-green/10 p-4 text-sm font-semibold text-rail-green">
-            The agent cannot execute outside these limits.
+            The agent cannot execute outside these limits. Empty or unlimited rules are not allowed in the MVP.
           </div>
         </div>
         <div className="rounded-lg border border-rail-border bg-rail-black p-5">
@@ -282,14 +367,36 @@ function PolicyReviewScreen({ onSign, policy }: PolicyReviewScreenProps) {
             </RailButton>
             <button
               className="min-h-12 rounded-lg border border-rail-border px-5 text-sm font-semibold text-rail-secondary transition hover:border-rail-blue hover:text-rail-text"
+              onClick={() => setIsEditing((current) => !current)}
               type="button"
             >
-              Edit Rules
+              {isEditing ? "Done Editing" : "Edit Rules"}
             </button>
           </div>
         </div>
       </div>
     </ScreenFrame>
+  );
+}
+
+interface PolicyInputProps {
+  label: string;
+  onChange: (value: string) => void;
+  value: number;
+}
+
+function PolicyInput({ label, onChange, value }: PolicyInputProps) {
+  return (
+    <label className="grid gap-2 text-sm font-semibold text-rail-secondary">
+      {label}
+      <input
+        className="min-h-12 rounded-lg border border-rail-border bg-rail-black px-3 text-rail-text outline-none focus:border-rail-green"
+        min={0}
+        onChange={(event) => onChange(event.target.value)}
+        type="number"
+        value={value}
+      />
+    </label>
   );
 }
 
@@ -330,14 +437,22 @@ function ActivationScreen({ activeStep }: ActivationScreenProps) {
 }
 
 interface DashboardScreenProps {
+  account: UserAccount;
   activity: ActivityEvent[];
+  onDeposit: (amount: number) => void;
   onPause: () => void;
   onReset: () => void;
+  onResume: () => void;
+  onRevoke: () => void;
+  onWithdraw: (amount: number) => void;
   policy: PolicyDraft;
 }
 
-function DashboardScreen({ activity, onPause, onReset, policy }: DashboardScreenProps) {
+function DashboardScreen({ account, activity, onDeposit, onPause, onReset, onResume, onRevoke, onWithdraw, policy }: DashboardScreenProps) {
+  const [selectedEvent, setSelectedEvent] = useState<ActivityEvent | null>(null);
   const events = useMemo(() => (activity.length > 0 ? activity : simulateAgentActivity()), [activity]);
+  const isPaused = policy.status === "paused";
+  const isRevoked = policy.status === "revoked";
 
   return (
     <ScreenFrame eyebrow="Dashboard" title="Your automation is live inside approved rails.">
@@ -351,40 +466,57 @@ function DashboardScreen({ activity, onPause, onReset, policy }: DashboardScreen
         <div className="absolute inset-0 bg-[linear-gradient(110deg,rgba(8,10,13,0.96),rgba(8,10,13,0.76)_52%,rgba(8,10,13,0.92)),radial-gradient(circle_at_76%_18%,rgba(53,229,140,0.16),transparent_34%)]" />
         <div className="relative grid gap-5 p-4 sm:p-5 xl:grid-cols-[0.9fr_1.1fr]">
           <div className="grid gap-5">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Metric icon={<Gauge size={18} />} label="Vault balance" value="142.80 USDC" />
-              <Metric icon={<Play size={18} />} label="Next action" value="Friday 09:00" />
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Metric icon={<Gauge size={18} />} label="Vault balance" value={formatUSDC(account.vaultBalanceUSDC)} />
+              <Metric icon={<Play size={18} />} label="Next action" value={isPaused || isRevoked ? "Stopped" : "Friday 09:00"} />
+              <Metric icon={<WalletCards size={18} />} label="Session key" value={account.sessionKeyStatus} />
             </div>
             <div className="rounded-lg border border-rail-border bg-rail-panel/90 p-5 backdrop-blur">
               <div className="mb-5 flex items-center justify-between gap-4">
                 <div>
                   <p className="text-sm font-semibold text-rail-secondary">Active Policy</p>
-                  <h3 className="mt-1 text-2xl font-semibold text-rail-text">Weekly DCA</h3>
+                  <h3 className="mt-1 text-2xl font-semibold text-rail-text">{policy.strategy} guardrails</h3>
                 </div>
-                <StatusPill label={policy.status === "paused" ? "Paused" : "Active"} tone={policy.status === "paused" ? "amber" : "green"} />
+                <StatusPill label={policy.status} tone={policy.status === "active" ? "green" : policy.status === "revoked" ? "red" : "amber"} />
               </div>
               <div className="grid gap-3">
-                <PolicyField label="Spend" value={policy.spendPerExecution} />
-                <PolicyField label="Allowed assets" value={policy.allowedAssets} />
-                <PolicyField label="Slippage limit" value={policy.slippageLimit} />
-                <PolicyField label="Minimum reserve" value={policy.minimumReserve} />
+                <PolicyField label="Spend" value={formatUSDC(policy.spendPerExecutionUSDC)} />
+                <PolicyField label="Allowed assets" value={`${policy.inputAsset} -> ${policy.outputAsset}`} />
+                <PolicyField label="Slippage limit" value={formatSlippage(policy.slippageBps)} />
+                <PolicyField label="Minimum reserve" value={formatUSDC(policy.minimumReserveUSDC)} />
               </div>
-              <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <button
+                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-green hover:text-rail-text"
+                  onClick={() => onDeposit(25)}
+                  type="button"
+                >
+                  <ArrowRight size={17} />
+                  Deposit 25 USDC
+                </button>
+                <button
+                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-blue hover:text-rail-text"
+                  onClick={() => onWithdraw(10)}
+                  type="button"
+                >
+                  <RotateCcw size={17} />
+                  Withdraw 10 USDC
+                </button>
                 <button
                   className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-amber hover:text-rail-text"
-                  onClick={onPause}
+                  onClick={isPaused ? onResume : onPause}
                   type="button"
                 >
                   <PauseCircle size={17} />
-                  Pause Automation
+                  {isPaused ? "Resume Automation" : "Pause Automation"}
                 </button>
                 <button
                   className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-red hover:text-rail-text"
-                  onClick={onReset}
+                  onClick={isRevoked ? onReset : onRevoke}
                   type="button"
                 >
                   <LockKeyhole size={17} />
-                  Revoke Policy
+                  {isRevoked ? "Create New Policy" : "Revoke Policy"}
                 </button>
               </div>
             </div>
@@ -399,13 +531,45 @@ function DashboardScreen({ activity, onPause, onReset, policy }: DashboardScreen
             </div>
             <div className="grid gap-4">
               {events.map((event, index) => (
-                <ActivityCard event={event} featured={index === 0} key={event.id} />
+                <ActivityCard event={event} featured={index === 0} key={event.id} onClick={() => setSelectedEvent(event)} />
               ))}
             </div>
           </div>
         </div>
       </div>
+      {selectedEvent ? <ActivityDetail event={selectedEvent} onClose={() => setSelectedEvent(null)} /> : null}
     </ScreenFrame>
+  );
+}
+
+interface ActivityDetailProps {
+  event: ActivityEvent;
+  onClose: () => void;
+}
+
+function ActivityDetail({ event, onClose }: ActivityDetailProps) {
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="ml-auto flex h-full max-w-xl flex-col rounded-lg border border-rail-border bg-rail-black p-5 shadow-glow">
+        <div className="flex items-start justify-between gap-4 border-b border-rail-border pb-4">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-rail-muted">Action detail</p>
+            <h3 className="mt-2 text-2xl font-semibold text-rail-text">{event.title}</h3>
+          </div>
+          <button className="rounded-lg border border-rail-border p-2 text-rail-secondary hover:text-rail-text" onClick={onClose} type="button">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="grid gap-4 py-5">
+          <ProofLine label="Attempted" value={event.attempted} />
+          <ProofLine label="Rule checked" value={event.rule} />
+          <ProofLine label="Simulation" value={event.simulationResult} />
+          <ProofLine label="Transaction status" value={event.transaction.status} />
+          <ProofLine label="Funds moved" value={event.fundsMoved} />
+          <ProofLine label="Reason" value={event.reason} />
+        </div>
+      </div>
+    </div>
   );
 }
 
