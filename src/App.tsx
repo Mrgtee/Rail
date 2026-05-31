@@ -268,9 +268,6 @@ function Hero({ onLaunch }: HeroProps) {
           }}
           className="max-w-2xl"
         >
-          <motion.div variants={entrance} className="mb-8">
-            <LogoLockup />
-          </motion.div>
           <motion.p variants={entrance} className="mb-5 text-sm font-medium uppercase tracking-[0.22em] text-rail-green">
             Autonomous finance, kept on track
           </motion.p>
@@ -794,58 +791,67 @@ function DashboardScreen({ activity, onPause, onReset, policy }: DashboardScreen
 
   return (
     <ScreenFrame eyebrow="Dashboard" title="Your automation is live inside approved rails.">
-      <div className="mt-8 grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
-        <div className="grid gap-5">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Metric icon={<Gauge size={18} />} label="Vault balance" value="142.80 USDC" />
-            <Metric icon={<Play size={18} />} label="Next action" value="Friday 09:00" />
+      <div className="relative mt-8 overflow-hidden rounded-lg border border-rail-border bg-rail-black">
+        <img
+          alt=""
+          aria-hidden="true"
+          className="absolute inset-0 h-full w-full object-cover opacity-25"
+          src="/dashboard-background.jpg"
+        />
+        <div className="absolute inset-0 bg-[linear-gradient(110deg,rgba(8,10,13,0.96),rgba(8,10,13,0.76)_52%,rgba(8,10,13,0.92)),radial-gradient(circle_at_76%_18%,rgba(53,229,140,0.16),transparent_34%)]" />
+        <div className="relative grid gap-5 p-4 sm:p-5 xl:grid-cols-[0.9fr_1.1fr]">
+          <div className="grid gap-5">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Metric icon={<Gauge size={18} />} label="Vault balance" value="142.80 USDC" />
+              <Metric icon={<Play size={18} />} label="Next action" value="Friday 09:00" />
+            </div>
+            <div className="rounded-lg border border-rail-border bg-rail-panel/90 p-5 backdrop-blur">
+              <div className="mb-5 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold text-rail-secondary">Active Policy</p>
+                  <h3 className="mt-1 text-2xl font-semibold text-rail-text">Weekly DCA</h3>
+                </div>
+                <StatusPill label={policy.status === "paused" ? "Paused" : "Active"} tone={policy.status === "paused" ? "amber" : "green"} />
+              </div>
+              <div className="grid gap-3">
+                <PolicyField label="Spend" value={policy.spendPerExecution} />
+                <PolicyField label="Allowed assets" value={policy.allowedAssets} />
+                <PolicyField label="Slippage limit" value={policy.slippageLimit} />
+                <PolicyField label="Minimum reserve" value={policy.minimumReserve} />
+              </div>
+              <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+                <button
+                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-amber hover:text-rail-text"
+                  onClick={onPause}
+                  type="button"
+                >
+                  <PauseCircle size={17} />
+                  Pause Automation
+                </button>
+                <button
+                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-red hover:text-rail-text"
+                  onClick={onReset}
+                  type="button"
+                >
+                  <LockKeyhole size={17} />
+                  Revoke Policy
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="rounded-lg border border-rail-border bg-rail-panel p-5">
+          <div className="rounded-lg border border-rail-border bg-rail-black/90 p-5 backdrop-blur">
             <div className="mb-5 flex items-center justify-between gap-4">
               <div>
-                <p className="text-sm font-semibold text-rail-secondary">Active Policy</p>
-                <h3 className="mt-1 text-2xl font-semibold text-rail-text">Weekly DCA</h3>
+                <p className="text-sm font-semibold text-rail-secondary">Activity Feed</p>
+                <h3 className="mt-1 text-2xl font-semibold text-rail-text">Contract decisions</h3>
               </div>
-              <StatusPill label={policy.status === "paused" ? "Paused" : "Active"} tone={policy.status === "paused" ? "amber" : "green"} />
+              <StatusPill label="Live" tone="blue" />
             </div>
-            <div className="grid gap-3">
-              <PolicyField label="Spend" value={policy.spendPerExecution} />
-              <PolicyField label="Allowed assets" value={policy.allowedAssets} />
-              <PolicyField label="Slippage limit" value={policy.slippageLimit} />
-              <PolicyField label="Minimum reserve" value={policy.minimumReserve} />
+            <div className="grid gap-4">
+              {events.map((event, index) => (
+                <ActivityCard event={event} featured={index === 0} key={event.id} />
+              ))}
             </div>
-            <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-              <button
-                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-amber hover:text-rail-text"
-                onClick={onPause}
-                type="button"
-              >
-                <PauseCircle size={17} />
-                Pause Automation
-              </button>
-              <button
-                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-red hover:text-rail-text"
-                onClick={onReset}
-                type="button"
-              >
-                <LockKeyhole size={17} />
-                Revoke Policy
-              </button>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-rail-border bg-rail-black p-5">
-          <div className="mb-5 flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold text-rail-secondary">Activity Feed</p>
-              <h3 className="mt-1 text-2xl font-semibold text-rail-text">Contract decisions</h3>
-            </div>
-            <StatusPill label="Live" tone="blue" />
-          </div>
-          <div className="grid gap-4">
-            {events.map((event, index) => (
-              <ActivityCard event={event} featured={index === 0} key={event.id} />
-            ))}
           </div>
         </div>
       </div>
