@@ -13,7 +13,7 @@
     "preview:frontend": "vite preview",
     "lint": "npm run typecheck",
     "test": "npm run typecheck",
-    "dev:backend": "tsx server/src/index.ts",
+    "dev:backend": "TMPDIR=/tmp tsx server/src/index.ts",
     "build:backend": "tsc -p server/tsconfig.json",
     "dev:full": "npm run dev:frontend",
     "test:backend": "npm run build:backend",
