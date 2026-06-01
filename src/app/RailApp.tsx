@@ -16,7 +16,7 @@ import {
 } from "../domain/mockRail";
 import type { ActivityEvent, AppStage, PolicyDraft, UserAccount } from "../domain/types";
 import { useRailContracts } from "../contracts/useRailContracts";
-import { draftPolicyFromAgent } from "../services/railApi";
+import { draftPolicyFromAgent, executeAgentAction, fetchRailHealth, type AgentDemoScenario, type RailHealth } from "../services/railApi";
 import { useRailWallet } from "../wallet/useRailWallet";
 
 export function RailApp() {
@@ -30,6 +30,7 @@ export function RailApp() {
   const [draftingStep, setDraftingStep] = useState(0);
   const [activationStep, setActivationStep] = useState(0);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
+  const [health, setHealth] = useState<RailHealth | null>(null);
 
   const { canWriteContracts, createPolicy: createPolicyOnchain, vaultBalanceUSDC } = useRailContracts(account);
   const activePolicy = policy ?? samplePolicy;
@@ -105,6 +106,73 @@ export function RailApp() {
 
     setActivationStep(0);
     moveToApp("activating");
+  };
+
+
+  const handleCheckHealth = () => {
+    void fetchRailHealth()
+      .then(setHealth)
+      .catch(() => {
+        setHealth({
+          ok: false,
+          service: "rail-agent",
+          openaiConfigured: false,
+          robinhoodRpcConfigured: false,
+          contractsConfigured: false,
+        });
+      });
+  };
+
+  const handleRunAgentDemo = (scenario: AgentDemoScenario) => {
+    const overrides =
+      scenario === "blocked-slippage"
+        ? { slippageBps: activePolicy.slippageBps + 75 }
+        : scenario === "blocked-overspend"
+          ? { amountUSDC: activePolicy.spendPerExecutionUSDC + 15 }
+          : {
+              amountUSDC: activePolicy.spendPerExecutionUSDC,
+              slippageBps: Math.max(1, activePolicy.slippageBps - 25),
+              projectedReserveUSDC: Math.max(activePolicy.minimumReserveUSDC, account.vaultBalanceUSDC - activePolicy.spendPerExecutionUSDC),
+            };
+
+    void executeAgentAction(activePolicy, account, overrides)
+      .then((result) => {
+        pushActivity(result.activity);
+        if (result.status === "executed") {
+          setAccount((current) => ({
+            ...current,
+            vaultBalanceUSDC: Math.max(0, current.vaultBalanceUSDC - (overrides.amountUSDC ?? activePolicy.spendPerExecutionUSDC)),
+          }));
+        }
+      })
+      .catch(() => {
+        const isBlocked = scenario !== "valid";
+        const amount = overrides.amountUSDC ?? activePolicy.spendPerExecutionUSDC;
+        pushActivity(
+          createLocalActivity({
+            kind: isBlocked ? "blocked" : "executed",
+            policyId: activePolicy.id,
+            title: isBlocked ? (scenario === "blocked-slippage" ? "Blocked: slippage above policy" : "Blocked: spend above policy") : "Executed demo action",
+            attempted: `dca-swap: ${amount} ${activePolicy.inputAsset} -> ${activePolicy.outputAsset}`,
+            reason: isBlocked
+              ? scenario === "blocked-slippage"
+                ? "Route exceeds signed slippage limit."
+                : "Action exceeds spend per execution."
+              : "Action matched the active policy.",
+            rule: isBlocked ? (scenario === "blocked-slippage" ? "Max slippage" : "Max spend per execution") : "PolicyVault checks",
+            fundsMoved: isBlocked ? "0 USDC" : `${amount} USDC`,
+            actionType: "dca-swap",
+            simulationResult: isBlocked ? "blocked" : "passed",
+            transaction: {
+              chainId: activePolicy.chainId,
+              contractAddress: activePolicy.contractAddress,
+              status: isBlocked ? "not-submitted" : "confirmed",
+              hash: isBlocked ? undefined : "0xlocaldemoexecution",
+            },
+            txHash: isBlocked ? undefined : "0xlocaldemoexecution",
+          }),
+        );
+      });
   };
 
   const updatePolicyStatus = (status: PolicyDraft["status"], title: string, reason: string) => {
@@ -263,6 +331,8 @@ export function RailApp() {
               activationStep={activationStep}
               draftingStep={draftingStep}
               goal={goal}
+              health={health}
+              onCheckHealth={handleCheckHealth}
               onConnect={handleConnectWallet}
               onConnectWrongNetwork={handleConnectWrongNetwork}
               onDeposit={(amount) => {
@@ -294,6 +364,7 @@ export function RailApp() {
               }}
               onResume={() => updatePolicyStatus("active", "Automation resumed", "Agent execution can continue inside the approved policy.")}
               onRevoke={() => updatePolicyStatus("revoked", "Policy revoked", "Future agent actions are disabled for this policy.")}
+              onRunAgentDemo={handleRunAgentDemo}
               onSign={handleSignPolicy}
               onSwitchNetwork={handleSwitchNetwork}
               onUpdatePolicy={setPolicy}

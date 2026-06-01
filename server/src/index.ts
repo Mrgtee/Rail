@@ -57,14 +57,26 @@ app.post("/api/agent/execute", async (c) => {
   }
 
   const simulation = simulateAction(parsed.data);
+  const txHash = simulation.executable ? "0xdemoagentexecution" : undefined;
   const activity = addActivity(parsed.data.walletAddress, {
     kind: simulation.executable ? "executed" : "blocked",
+    status: simulation.executable ? "executed" : "blocked",
+    actionType: parsed.data.action.type,
     title: simulation.executable ? "Executed demo action" : `Blocked: ${simulation.rule}`,
     attempted: simulation.attempted,
     reason: simulation.reason,
     rule: simulation.rule,
     fundsMoved: simulation.executable ? `${parsed.data.action.amountUSDC} USDC` : "0 USDC",
     policyId: parsed.data.policy.id,
+    simulationResult: simulation.executable ? "passed" : "blocked",
+    transaction: {
+      chainId: parsed.data.policy.chainId,
+      contractAddress: parsed.data.policy.contractAddress,
+      hash: txHash,
+      status: simulation.executable ? "confirmed" : "not-submitted",
+    },
+    timestamp: "Just now",
+    txHash,
   });
 
   return c.json({
@@ -72,7 +84,7 @@ app.post("/api/agent/execute", async (c) => {
     status: simulation.executable ? "executed" : "blocked",
     simulation,
     activity,
-    txHash: simulation.executable ? "0xdemoagentexecution" : undefined,
+    txHash,
   });
 });
 

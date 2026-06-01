@@ -20,6 +20,7 @@ import { explorerAddressUrl, explorerTxUrl, primaryChain } from "../../domain/ch
 import { activationSteps, draftingSteps, simulateAgentActivity } from "../../domain/mockRail";
 import { formatSlippage, formatUSDC, policyFields, shortAddress } from "../../domain/formatters";
 import type { ActivityEvent, AppStage, PolicyDraft, UserAccount } from "../../domain/types";
+import type { AgentDemoScenario, RailHealth } from "../../services/railApi";
 import {
   ActivityCard,
   Metric,
@@ -41,6 +42,8 @@ interface ProductWorkspaceProps {
   draftingStep: number;
   goal: string;
   onConnect: () => void;
+  health: RailHealth | null;
+  onCheckHealth: () => void;
   onConnectWrongNetwork: () => void;
   onDeposit: (amount: number) => void;
   onGeneratePolicy: () => void;
@@ -50,6 +53,7 @@ interface ProductWorkspaceProps {
   onReset: () => void;
   onResume: () => void;
   onRevoke: () => void;
+  onRunAgentDemo: (scenario: AgentDemoScenario) => void;
   onSign: () => void;
   onSwitchNetwork: () => void;
   onUpdatePolicy: (policy: PolicyDraft) => void;
@@ -64,6 +68,8 @@ export function ProductWorkspace({
   activationStep,
   draftingStep,
   goal,
+  health,
+  onCheckHealth,
   onConnect,
   onConnectWrongNetwork,
   onDeposit,
@@ -74,6 +80,7 @@ export function ProductWorkspace({
   onReset,
   onResume,
   onRevoke,
+  onRunAgentDemo,
   onSign,
   onSwitchNetwork,
   onUpdatePolicy,
@@ -124,11 +131,14 @@ export function ProductWorkspace({
                 key="dashboard"
                 account={account}
                 activity={activity}
+                health={health}
+                onCheckHealth={onCheckHealth}
                 onDeposit={onDeposit}
                 onPause={onPause}
                 onReset={onReset}
                 onResume={onResume}
                 onRevoke={onRevoke}
+                onRunAgentDemo={onRunAgentDemo}
                 onWithdraw={onWithdraw}
                 policy={policy}
               />
@@ -449,16 +459,19 @@ function ActivationScreen({ activeStep }: ActivationScreenProps) {
 interface DashboardScreenProps {
   account: UserAccount;
   activity: ActivityEvent[];
+  health: RailHealth | null;
+  onCheckHealth: () => void;
   onDeposit: (amount: number) => void;
   onPause: () => void;
   onReset: () => void;
   onResume: () => void;
   onRevoke: () => void;
+  onRunAgentDemo: (scenario: AgentDemoScenario) => void;
   onWithdraw: (amount: number) => void;
   policy: PolicyDraft;
 }
 
-function DashboardScreen({ account, activity, onDeposit, onPause, onReset, onResume, onRevoke, onWithdraw, policy }: DashboardScreenProps) {
+function DashboardScreen({ account, activity, health, onCheckHealth, onDeposit, onPause, onReset, onResume, onRevoke, onRunAgentDemo, onWithdraw, policy }: DashboardScreenProps) {
   const [selectedEvent, setSelectedEvent] = useState<ActivityEvent | null>(null);
   const events = useMemo(() => (activity.length > 0 ? activity : simulateAgentActivity()), [activity]);
   const isPaused = policy.status === "paused";
@@ -531,7 +544,9 @@ function DashboardScreen({ account, activity, onDeposit, onPause, onReset, onRes
               </div>
             </div>
           </div>
-          <div className="rounded-lg border border-rail-border bg-rail-black/90 p-5 backdrop-blur">
+          <div className="grid gap-5">
+            <DemoOperatorPanel health={health} onCheckHealth={onCheckHealth} onRunAgentDemo={onRunAgentDemo} />
+            <div className="rounded-lg border border-rail-border bg-rail-black/90 p-5 backdrop-blur">
             <div className="mb-5 flex items-center justify-between gap-4">
               <div>
                 <p className="text-sm font-semibold text-rail-secondary">Activity Feed</p>
@@ -544,11 +559,53 @@ function DashboardScreen({ account, activity, onDeposit, onPause, onReset, onRes
                 <ActivityCard event={event} featured={index === 0} key={event.id} onClick={() => setSelectedEvent(event)} />
               ))}
             </div>
+            </div>
           </div>
         </div>
       </div>
       {selectedEvent ? <ActivityDetail event={selectedEvent} onClose={() => setSelectedEvent(null)} /> : null}
     </ScreenFrame>
+  );
+}
+
+interface DemoOperatorPanelProps {
+  health: RailHealth | null;
+  onCheckHealth: () => void;
+  onRunAgentDemo: (scenario: AgentDemoScenario) => void;
+}
+
+function DemoOperatorPanel({ health, onCheckHealth, onRunAgentDemo }: DemoOperatorPanelProps) {
+  return (
+    <div className="rounded-lg border border-rail-border bg-rail-panel/90 p-5 backdrop-blur">
+      <div className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+        <div>
+          <p className="text-sm font-semibold text-rail-secondary">Demo Operator</p>
+          <h3 className="mt-1 text-2xl font-semibold text-rail-text">Agent action controls</h3>
+        </div>
+        <StatusPill label={health?.ok ? "Backend healthy" : "Health unknown"} tone={health?.ok ? "green" : "amber"} />
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <button className="min-h-12 rounded-lg border border-rail-green/40 px-4 text-sm font-semibold text-rail-green transition hover:bg-rail-green/10" onClick={() => onRunAgentDemo("valid")} type="button">
+          Run Valid DCA
+        </button>
+        <button className="min-h-12 rounded-lg border border-rail-red/40 px-4 text-sm font-semibold text-rail-red transition hover:bg-rail-red/10" onClick={() => onRunAgentDemo("blocked-slippage")} type="button">
+          Trigger Slippage Block
+        </button>
+        <button className="min-h-12 rounded-lg border border-rail-red/40 px-4 text-sm font-semibold text-rail-red transition hover:bg-rail-red/10" onClick={() => onRunAgentDemo("blocked-overspend")} type="button">
+          Trigger Overspend Block
+        </button>
+        <button className="min-h-12 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-blue hover:text-rail-text" onClick={onCheckHealth} type="button">
+          Check Backend Health
+        </button>
+      </div>
+      {health ? (
+        <div className="mt-4 grid gap-2 text-xs text-rail-secondary sm:grid-cols-3">
+          <span>OpenAI: {health.openaiConfigured ? "configured" : "fallback"}</span>
+          <span>RPC: {health.robinhoodRpcConfigured ? "configured" : "fallback"}</span>
+          <span>Contracts: {health.contractsConfigured ? "configured" : "demo"}</span>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

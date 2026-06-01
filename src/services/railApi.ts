@@ -3,6 +3,16 @@ import type { ActivityEvent, PolicyDraft, UserAccount } from "../domain/types";
 
 const apiBaseUrl = import.meta.env.VITE_RAIL_API_URL || "http://localhost:8787";
 
+export type AgentDemoScenario = "valid" | "blocked-slippage" | "blocked-overspend";
+
+export interface RailHealth {
+  ok: boolean;
+  service: string;
+  openaiConfigured: boolean;
+  robinhoodRpcConfigured: boolean;
+  contractsConfigured: boolean;
+}
+
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     method: "POST",
@@ -73,4 +83,13 @@ export async function fetchAgentActivity(walletAddress: string) {
   }
 
   return response.json() as Promise<{ ok: boolean; activity: ActivityEvent[] }>;
+}
+
+export async function fetchRailHealth() {
+  const response = await fetch(`${apiBaseUrl}/api/health`);
+  if (!response.ok) {
+    throw new Error("Rail backend health check failed.");
+  }
+
+  return response.json() as Promise<RailHealth>;
 }
