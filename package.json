@@ -20,7 +20,9 @@
     "contracts:build": "node scripts/compile-contracts.mjs",
     "contracts:test": "forge test",
     "contracts:sync": "node scripts/sync-contract-artifacts.mjs",
-    "contracts:deploy:local": "forge script contracts/script/DeployLocal.s.sol --broadcast --rpc-url ${ROBINHOOD_RPC_URL}"
+    "contracts:deploy:local": "forge script contracts/script/DeployLocal.s.sol --broadcast --rpc-url ${ROBINHOOD_RPC_URL}",
+    "stylus:test": "cargo test --manifest-path stylus-risk-engine/Cargo.toml",
+    "stylus:check": "cargo stylus check --manifest-path stylus-risk-engine/Cargo.toml"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.4",
