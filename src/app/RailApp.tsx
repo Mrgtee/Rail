@@ -9,13 +9,14 @@ import {
   demoAccount,
   disconnectedAccount,
   draftingSteps,
-  generatePolicy,
   samplePolicy,
   signPolicy,
   simulateAgentActivity,
   wrongNetworkAccount,
 } from "../domain/mockRail";
 import type { ActivityEvent, AppStage, PolicyDraft, UserAccount } from "../domain/types";
+import { useRailContracts } from "../contracts/useRailContracts";
+import { draftPolicyFromAgent } from "../services/railApi";
 import { useRailWallet } from "../wallet/useRailWallet";
 
 export function RailApp() {
@@ -30,6 +31,7 @@ export function RailApp() {
   const [activationStep, setActivationStep] = useState(0);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
 
+  const { canWriteContracts, createPolicy: createPolicyOnchain, vaultBalanceUSDC } = useRailContracts(account);
   const activePolicy = policy ?? samplePolicy;
 
   const moveToApp = (nextStage: AppStage) => {
@@ -124,6 +126,14 @@ export function RailApp() {
 
 
   useEffect(() => {
+    if (vaultBalanceUSDC === undefined) {
+      return;
+    }
+
+    setAccount((current) => ({ ...current, vaultBalanceUSDC: vaultBalanceUSDC ?? current.vaultBalanceUSDC }));
+  }, [vaultBalanceUSDC]);
+
+  useEffect(() => {
     if (isDemoWallet) {
       return;
     }
@@ -150,8 +160,11 @@ export function RailApp() {
     );
 
     const finishTimer = window.setTimeout(() => {
-      void generatePolicy(goal, account.address).then((draft) => {
-        setPolicy(draft);
+      void draftPolicyFromAgent(goal, account).then(({ policy: draft, provider }) => {
+        setPolicy({
+          ...draft,
+          warnings: [...draft.warnings, `Draft provider: ${provider}`],
+        });
         moveToApp("review");
       });
     }, draftingSteps.length * 430 + 420);
@@ -175,10 +188,53 @@ export function RailApp() {
 
     const finishTimer = window.setTimeout(() => {
       void signPolicy(activePolicy)
-        .then(activatePolicy)
-        .then((activatedPolicy) => {
+        .then(async (pendingPolicy) => {
+          let txHash: string | undefined;
+
+          if (!isDemoWallet && canWriteContracts) {
+            txHash = await createPolicyOnchain(pendingPolicy);
+          }
+
+          return { activatedPolicy: await activatePolicy(pendingPolicy), txHash };
+        })
+        .then(({ activatedPolicy, txHash }) => {
           setPolicy(activatedPolicy);
-          setActivity(simulateAgentActivity());
+          setActivity([
+            createLocalActivity({
+              kind: "executed",
+              policyId: activatedPolicy.id,
+              title: txHash ? "Policy created onchain" : "Policy activated in demo mode",
+              attempted: "Create PolicyVault policy",
+              reason: txHash ? "Wallet submitted PolicyVault.createPolicy." : "No contract addresses were configured, so Rail used demo activation.",
+              rule: "User signature required",
+              fundsMoved: "0 USDC",
+              actionType: "policy-update",
+              txHash,
+              transaction: {
+                chainId: activatedPolicy.chainId,
+                contractAddress: activatedPolicy.contractAddress,
+                hash: txHash,
+                status: txHash ? "pending" : "not-submitted",
+              },
+            }),
+            ...simulateAgentActivity(),
+          ]);
+          moveToApp("dashboard");
+        })
+        .catch((error) => {
+          setPolicy({ ...activePolicy, status: "failed", updatedAt: new Date().toISOString() });
+          setActivity([
+            createLocalActivity({
+              kind: "failed",
+              policyId: activePolicy.id,
+              title: "Policy activation failed",
+              attempted: "Create PolicyVault policy",
+              reason: error instanceof Error ? error.message : "Unable to activate policy.",
+              rule: "Wallet transaction",
+              fundsMoved: "0 USDC",
+              actionType: "policy-update",
+            }),
+          ]);
           moveToApp("dashboard");
         });
     }, activationSteps.length * 560 + 450);
@@ -187,7 +243,7 @@ export function RailApp() {
       timers.forEach(window.clearTimeout);
       window.clearTimeout(finishTimer);
     };
-  }, [activePolicy, stage]);
+  }, [activePolicy, canWriteContracts, createPolicyOnchain, isDemoWallet, stage]);
 
   return (
     <div className="min-h-screen overflow-hidden bg-rail-black text-rail-text">
