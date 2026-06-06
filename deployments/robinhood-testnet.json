@@ -1,0 +1,48 @@
+{
+  "chainId": 46630,
+  "chainName": "Robinhood Chain Testnet",
+  "explorer": "https://explorer.testnet.chain.robinhood.com",
+  "deployedAt": "2026-06-06T23:19:54.431Z",
+  "deployer": "0x5c3f910eC4495401605d2F8eB67C570004C1fbC8",
+  "agent": "0x5c3f910ec4495401605d2f8eb67c570004c1fbc8",
+  "contracts": {
+    "policyVault": {
+      "address": "0x55738e2957c93fe4cf0da169d6066a672e461b79",
+      "txHash": "0x79573ea6152604f87f70050d6f32739be44eb86dab60dd47ffd62097126c76e8"
+    },
+    "agentExecutor": {
+      "address": "0xe09e7288adf4d974c230e6daed7d95e8d7737553",
+      "txHash": "0x7de6ae5ef59b03027a4a24c2579da9ffdbe135732fa66efb7893f82a50999bb1"
+    },
+    "strategyRegistry": {
+      "address": "0x90a4662141f105e63ce44b1868af26017d6ef2e9",
+      "txHash": "0x21ab1b836eafc81e8602a463814393854dffe940567061d66845f087f99dce3b"
+    },
+    "mockUSDC": {
+      "address": "0x0dfddb41d4b43e10434232d3dc617a8aedb30093",
+      "txHash": "0xaf666006c6bce7164e8778cfe077407d8f842bfbeb51a0d70ff7ceecef589e4c"
+    },
+    "mockWETH": {
+      "address": "0x147f77bebe41a188614ab73c09de4bff6da6c49f",
+      "txHash": "0x5fec24a339ddf4a8b82370a785dfffa374d270b40db44a0bc7e990e3170b3240"
+    },
+    "mockRouter": {
+      "address": "0x6cb882d547409db1d56c56c2c15312a18fa71ac3",
+      "txHash": "0xef79baa08af84de12b469072663b7bd5865394adac1e85b8fba325ecfe812937"
+    }
+  },
+  "initialization": [
+    {
+      "label": "PolicyVault.setExecutor",
+      "hash": "0xa719ed6d17d7036a40706026f7f755965b632cdb5aa6c349a1ee39cc4f998ba2"
+    },
+    {
+      "label": "MockRouter.setRate",
+      "hash": "0x646a8a2e64a8d67875a735588b24f203b4c7c8521ba5a3f2d73aabfd982d1a7e"
+    },
+    {
+      "label": "StrategyRegistry.setStrategy",
+      "hash": "0xb95437b02c9abfab17de852b9d48d81d291cd2d7697927c087c7c3cf243ba657"
+    }
+  ]
+}

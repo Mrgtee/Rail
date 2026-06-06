@@ -23,7 +23,8 @@
     "contracts:deploy:local": "forge script contracts/script/DeployLocal.s.sol --broadcast --rpc-url ${ROBINHOOD_RPC_URL}",
     "stylus:test": "cargo test --manifest-path stylus-risk-engine/Cargo.toml",
     "stylus:check": "cargo stylus check --manifest-path stylus-risk-engine/Cargo.toml",
-    "verify": "npm run build && npm run build:backend && npm run contracts:build"
+    "verify": "npm run build && npm run build:backend && npm run contracts:build",
+    "contracts:deploy:robinhood": "npm run contracts:build && node scripts/deploy-contracts.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.4",

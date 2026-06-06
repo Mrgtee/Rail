@@ -121,20 +121,31 @@ npm run stylus:check
 
 ## Contract deployment notes
 
-Foundry project settings live in `foundry.toml`. The local deployment script is:
+Foundry project settings live in `foundry.toml`. This repo also includes a Node/viem deployment path for environments where Foundry is not installed:
+
+```bash
+npm run contracts:deploy:robinhood
+```
+
+The deploy script reads `.env.local`, deploys the Rail contracts to Robinhood Chain Testnet, initializes the executor/router/strategy settings, writes public metadata to `deployments/robinhood-testnet.json`, and updates local address fields in `.env.local`.
+
+Optional Foundry path when `forge` is installed:
 
 ```bash
 forge script contracts/script/DeployLocal.s.sol --broadcast --rpc-url $ROBINHOOD_RPC_URL
 ```
 
-After deployment, copy the deployed addresses into `.env.local`, then run:
+Current Robinhood Chain Testnet deployment:
 
-```bash
-npm run contracts:build
-npm run contracts:sync
-```
+- PolicyVault: `0x55738e2957c93fe4cf0da169d6066a672e461b79`
+- AgentExecutor: `0xe09e7288adf4d974c230e6daed7d95e8d7737553`
+- StrategyRegistry: `0x90a4662141f105e63ce44b1868af26017d6ef2e9`
+- MockUSDC: `0x0dfddb41d4b43e10434232d3dc617a8aedb30093`
+- MockWETH: `0x147f77bebe41a188614ab73c09de4bff6da6c49f`
+- MockRouter: `0x6cb882d547409db1d56c56c2c15312a18fa71ac3`
 
-Current deployed addresses: not deployed from this environment.
+Explorer: https://explorer.testnet.chain.robinhood.com
+
 
 ## Verification performed
 
