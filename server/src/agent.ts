@@ -10,13 +10,19 @@ export function validatePolicy(policy: AgentActionRequest["policy"]) {
     errors.push("Spend limit must be greater than zero.");
   }
   if (policy.monthlyCapUSDC < policy.spendPerExecutionUSDC) {
-    errors.push("Monthly cap must be at least one execution spend.");
+    errors.push("Period cap must be at least one execution spend.");
+  }
+  if (policy.intervalValue <= 0) {
+    errors.push("Execution interval must be greater than zero.");
   }
   if (policy.slippageBps > 500) {
     errors.push("Slippage cannot exceed 5% in the MVP.");
   }
   if (!policy.allowedAssets.includes(policy.inputAsset) || !policy.allowedAssets.includes(policy.outputAsset)) {
     errors.push("Input and output assets must be explicitly allowed.");
+  }
+  if (policy.inputAsset === policy.outputAsset) {
+    errors.push("Input and output assets must be different.");
   }
 
   return { ok: errors.length === 0, errors };
@@ -32,6 +38,9 @@ export function simulateAction(request: AgentActionRequest) {
 
   if (policy.status !== "active" && policy.status !== "awaiting-signature") {
     return { executable: false, reason: `Policy is ${policy.status}.`, rule: "Active policy status", ...base };
+  }
+  if (action.inputAsset !== policy.inputAsset || action.outputAsset !== policy.outputAsset) {
+    return { executable: false, reason: "Action pair does not match the signed policy pair.", rule: "Signed asset pair", ...base };
   }
   if (!policy.allowedAssets.includes(action.inputAsset) || !policy.allowedAssets.includes(action.outputAsset)) {
     return { executable: false, reason: "Action uses an asset outside the signed allowlist.", rule: "Allowed assets", ...base };

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-export const supportedAssets = ["USDC", "ETH", "ARB"] as const;
+export const supportedAssets = ["USDC", "ETH"] as const;
+export const intervalUnits = ["seconds", "minutes", "hours", "days", "weeks", "years"] as const;
 
 export const policyDraftRequestSchema = z.object({
   walletAddress: z.string().optional(),
@@ -19,6 +20,8 @@ export const policySchema = z.object({
   allowedAssets: z.array(z.string()).min(1),
   spendPerExecutionUSDC: z.number().positive(),
   frequency: z.enum(["Daily", "Weekly", "Monthly"]),
+  intervalValue: z.number().int().positive().default(1),
+  intervalUnit: z.enum(intervalUnits).default("weeks"),
   monthlyCapUSDC: z.number().positive(),
   slippageBps: z.number().int().min(1).max(500),
   minimumReserveUSDC: z.number().min(0),

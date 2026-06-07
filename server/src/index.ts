@@ -105,7 +105,7 @@ app.post("/api/agent/execute", async (c) => {
     attempted: simulation.attempted,
     reason,
     rule: status === "failed" ? "AgentExecutor transaction" : simulation.rule,
-    fundsMoved: status === "executed" ? `${parsed.data.action.amountUSDC} USDC` : "0 USDC",
+    fundsMoved: status === "executed" ? `${parsed.data.action.amountUSDC} ${parsed.data.action.inputAsset}` : `0 ${parsed.data.action.inputAsset}`,
     policyId: parsed.data.policy.id,
     simulationResult: status === "executed" ? "passed" : status === "blocked" ? "blocked" : "failed",
     transaction: {

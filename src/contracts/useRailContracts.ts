@@ -1,15 +1,35 @@
 import { useCallback } from "react";
-import { decodeEventLog, parseUnits, zeroAddress, type Address, type Hash, type TransactionReceipt } from "viem";
+import { decodeEventLog, formatUnits, parseUnits, zeroAddress, type Address, type Hash, type TransactionReceipt } from "viem";
 import { usePublicClient, useReadContract, useWriteContract } from "wagmi";
 import { contractAddresses, contractsConfigured } from "./addresses";
 import { mockUSDCAbi, policyVaultAbi } from "./generated";
-import type { PolicyDraft, UserAccount } from "../domain/types";
+import type { IntervalUnit, PolicyDraft, UserAccount } from "../domain/types";
 
 function asAddress(value: string | undefined): Address {
   return (value && value.startsWith("0x") ? value : zeroAddress) as Address;
 }
 
+function tokenForAsset(asset: string) {
+  const normalized = asset.toUpperCase();
+  if (normalized === "ETH" || normalized === "WETH") {
+    return { address: asAddress(contractAddresses.mockWETH), decimals: 18, symbol: "ETH" };
+  }
+  return { address: asAddress(contractAddresses.mockUSDC), decimals: 6, symbol: "USDC" };
+}
+
+function secondsForUnit(unit: IntervalUnit) {
+  if (unit === "seconds") return 1;
+  if (unit === "minutes") return 60;
+  if (unit === "hours") return 3_600;
+  if (unit === "days") return 86_400;
+  if (unit === "weeks") return 604_800;
+  return 31_536_000;
+}
+
 function cooldownSeconds(policy: PolicyDraft) {
+  if (policy.intervalValue > 0 && policy.intervalUnit) {
+    return Math.min(4_294_967_295, Math.max(1, Math.floor(policy.intervalValue * secondsForUnit(policy.intervalUnit))));
+  }
   if (policy.frequency === "Daily") return 86_400;
   if (policy.frequency === "Monthly") return 2_592_000;
   return 604_800;
@@ -38,8 +58,8 @@ export function useRailContracts(account: UserAccount) {
   const { writeContractAsync, isPending } = useWriteContract();
   const publicClient = usePublicClient();
   const owner = asAddress(account.address);
-  const usdc = asAddress(contractAddresses.mockUSDC);
-  const outputAsset = asAddress(contractAddresses.mockWETH || contractAddresses.mockUSDC);
+  const usdc = tokenForAsset("USDC");
+  const weth = tokenForAsset("ETH");
   const policyVault = asAddress(contractAddresses.policyVault);
 
   const waitForSuccess = useCallback(async (hash: Hash) => {
@@ -74,30 +94,40 @@ export function useRailContracts(account: UserAccount) {
   }, [policyVault]);
 
   const { data: tokenBalance, refetch: refetchTokenBalance } = useReadContract({
-    address: usdc,
+    address: usdc.address,
     abi: mockUSDCAbi,
     functionName: "balanceOf",
     args: [owner],
-    query: { enabled: contractsConfigured && account.status === "connected" && owner !== zeroAddress && usdc !== zeroAddress },
+    query: { enabled: contractsConfigured && account.status === "connected" && owner !== zeroAddress && usdc.address !== zeroAddress },
   });
 
-  const { data: vaultBalance, refetch: refetchVaultBalance } = useReadContract({
+  const { data: vaultBalanceUSDC, refetch: refetchVaultBalanceUSDC } = useReadContract({
     address: policyVault,
     abi: policyVaultAbi,
     functionName: "vaultBalanceOf",
-    args: [owner, usdc],
-    query: { enabled: contractsConfigured && account.status === "connected" && owner !== zeroAddress && policyVault !== zeroAddress && usdc !== zeroAddress },
+    args: [owner, usdc.address],
+    query: { enabled: contractsConfigured && account.status === "connected" && owner !== zeroAddress && policyVault !== zeroAddress && usdc.address !== zeroAddress },
+  });
+
+  const { data: vaultBalanceWETH, refetch: refetchVaultBalanceWETH } = useReadContract({
+    address: policyVault,
+    abi: policyVaultAbi,
+    functionName: "vaultBalanceOf",
+    args: [owner, weth.address],
+    query: { enabled: contractsConfigured && account.status === "connected" && owner !== zeroAddress && policyVault !== zeroAddress && weth.address !== zeroAddress },
   });
 
   const refreshBalances = useCallback(async () => {
-    await Promise.all([refetchTokenBalance(), refetchVaultBalance()]);
-  }, [refetchTokenBalance, refetchVaultBalance]);
+    await Promise.all([refetchTokenBalance(), refetchVaultBalanceUSDC(), refetchVaultBalanceWETH()]);
+  }, [refetchTokenBalance, refetchVaultBalanceUSDC, refetchVaultBalanceWETH]);
 
   const createPolicy = useCallback(async (policy: PolicyDraft): Promise<OnchainPolicyResult> => {
     if (!contractsConfigured) {
       throw new Error("Rail contracts are not configured.");
     }
 
+    const input = tokenForAsset(policy.inputAsset);
+    const output = tokenForAsset(policy.outputAsset);
     const now = Math.floor(Date.now() / 1000);
     const hash = await writeContractAsync({
       address: policyVault,
@@ -105,12 +135,12 @@ export function useRailContracts(account: UserAccount) {
       functionName: "createPolicy",
       args: [
         {
-          inputAsset: usdc,
-          outputAsset,
-          spendLimit: parseUnits(String(policy.spendPerExecutionUSDC), 6),
-          monthlyCap: parseUnits(String(policy.monthlyCapUSDC), 6),
+          inputAsset: input.address,
+          outputAsset: output.address,
+          spendLimit: parseUnits(String(policy.spendPerExecutionUSDC), input.decimals),
+          monthlyCap: parseUnits(String(policy.monthlyCapUSDC), input.decimals),
           slippageBps: policy.slippageBps,
-          minimumReserve: parseUnits(String(policy.minimumReserveUSDC), 6),
+          minimumReserve: parseUnits(String(policy.minimumReserveUSDC), input.decimals),
           cooldownSeconds: cooldownSeconds(policy),
           expiresAt: BigInt(now + policy.expiryDays * 86_400),
           agent: asAddress(contractAddresses.agentExecutor),
@@ -120,16 +150,17 @@ export function useRailContracts(account: UserAccount) {
 
     const receipt = await waitForSuccess(hash);
     return { hash, policyId: extractPolicyId(receipt) };
-  }, [extractPolicyId, outputAsset, policyVault, usdc, waitForSuccess, writeContractAsync]);
+  }, [extractPolicyId, policyVault, waitForSuccess, writeContractAsync]);
 
-  const depositUSDC = useCallback(async (amountUSDC: number): Promise<OnchainDepositResult> => {
+  const depositAsset = useCallback(async (asset: string, amountValue: number): Promise<OnchainDepositResult> => {
     if (!contractsConfigured) {
       throw new Error("Rail contracts are not configured.");
     }
 
-    const amount = parseUnits(String(amountUSDC), 6);
+    const token = tokenForAsset(asset);
+    const amount = parseUnits(String(amountValue), token.decimals);
     const mintHash = await writeContractAsync({
-      address: usdc,
+      address: token.address,
       abi: mockUSDCAbi,
       functionName: "mint",
       args: [owner, amount],
@@ -137,7 +168,7 @@ export function useRailContracts(account: UserAccount) {
     await waitForSuccess(mintHash);
 
     const approveHash = await writeContractAsync({
-      address: usdc,
+      address: token.address,
       abi: mockUSDCAbi,
       functionName: "approve",
       args: [policyVault, amount],
@@ -148,29 +179,30 @@ export function useRailContracts(account: UserAccount) {
       address: policyVault,
       abi: policyVaultAbi,
       functionName: "deposit",
-      args: [usdc, amount],
+      args: [token.address, amount],
     });
     await waitForSuccess(depositHash);
     await refreshBalances();
 
     return { mintHash, approveHash, depositHash };
-  }, [owner, policyVault, refreshBalances, usdc, waitForSuccess, writeContractAsync]);
+  }, [owner, policyVault, refreshBalances, waitForSuccess, writeContractAsync]);
 
-  const withdrawUSDC = useCallback(async (amountUSDC: number) => {
+  const withdrawAsset = useCallback(async (asset: string, amountValue: number) => {
     if (!contractsConfigured) {
       throw new Error("Rail contracts are not configured.");
     }
 
+    const token = tokenForAsset(asset);
     const hash = await writeContractAsync({
       address: policyVault,
       abi: policyVaultAbi,
       functionName: "withdraw",
-      args: [usdc, parseUnits(String(amountUSDC), 6)],
+      args: [token.address, parseUnits(String(amountValue), token.decimals)],
     });
     await waitForSuccess(hash);
     await refreshBalances();
     return hash;
-  }, [policyVault, refreshBalances, usdc, waitForSuccess, writeContractAsync]);
+  }, [policyVault, refreshBalances, waitForSuccess, writeContractAsync]);
 
   const pausePolicy = useCallback(async (policy: PolicyDraft) => {
     const hash = await writeContractAsync({
@@ -208,13 +240,15 @@ export function useRailContracts(account: UserAccount) {
   return {
     canWriteContracts: contractsConfigured && account.status === "connected",
     createPolicy,
-    depositUSDC,
+    depositAsset,
     isWriting: isPending,
     pausePolicy,
+    refreshBalances,
     resumePolicy,
     revokePolicy,
-    tokenBalanceUSDC: typeof tokenBalance === "bigint" ? Number(tokenBalance) / 1e6 : undefined,
-    vaultBalanceUSDC: typeof vaultBalance === "bigint" ? Number(vaultBalance) / 1e6 : undefined,
-    withdrawUSDC,
+    tokenBalanceUSDC: typeof tokenBalance === "bigint" ? Number(formatUnits(tokenBalance, usdc.decimals)) : undefined,
+    vaultBalanceUSDC: typeof vaultBalanceUSDC === "bigint" ? Number(formatUnits(vaultBalanceUSDC, usdc.decimals)) : undefined,
+    vaultBalanceWETH: typeof vaultBalanceWETH === "bigint" ? Number(formatUnits(vaultBalanceWETH, weth.decimals)) : undefined,
+    withdrawAsset,
   };
 }

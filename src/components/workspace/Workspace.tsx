@@ -16,10 +16,11 @@ import {
 } from "lucide-react";
 import { AnimatePresence } from "framer-motion";
 import { useMemo, useState } from "react";
+import { assetTicker, displayAsset, pairedSwapAsset, supportedSwapAssets } from "../../domain/assets";
 import { explorerAddressUrl, explorerTxUrl, primaryChain } from "../../domain/chains";
 import { activationSteps, draftingSteps, simulateAgentActivity } from "../../domain/mockRail";
-import { formatSlippage, formatUSDC, policyFields, shortAddress } from "../../domain/formatters";
-import type { ActivityEvent, AppStage, PolicyDraft, UserAccount } from "../../domain/types";
+import { formatAssetAmount, formatSlippage, intervalLabel, policyFields, policyRoute, shortAddress } from "../../domain/formatters";
+import type { ActivityEvent, AppStage, IntervalUnit, PolicyDraft, UserAccount } from "../../domain/types";
 import type { AgentDemoScenario, RailHealth } from "../../services/railApi";
 import {
   ActivityCard,
@@ -45,7 +46,7 @@ interface ProductWorkspaceProps {
   health: RailHealth | null;
   onCheckHealth: () => void;
   onConnectWrongNetwork: () => void;
-  onDeposit: (amount: number) => void;
+  onDeposit: (amount: number, asset: string) => void;
   onGeneratePolicy: () => void;
   onGoalChange: (goal: string) => void;
   onLaunch: () => void;
@@ -53,11 +54,11 @@ interface ProductWorkspaceProps {
   onReset: () => void;
   onResume: () => void;
   onRevoke: () => void;
-  onRunAgentDemo: (scenario: AgentDemoScenario) => void;
+  onRunAgentDemo: (scenario: AgentDemoScenario, amount?: number) => void;
   onSign: () => void;
   onSwitchNetwork: () => void;
   onUpdatePolicy: (policy: PolicyDraft) => void;
-  onWithdraw: (amount: number) => void;
+  onWithdraw: (amount: number, asset: string) => void;
   isLiveMode: boolean;
   policy: PolicyDraft;
   stage: AppStage;
@@ -330,8 +331,23 @@ function PolicyReviewScreen({ onSign, onUpdatePolicy, policy }: PolicyReviewScre
   const [isEditing, setIsEditing] = useState(false);
   const fields = policyFields(policy);
 
-  const updateNumber = (key: keyof Pick<PolicyDraft, "spendPerExecutionUSDC" | "monthlyCapUSDC" | "minimumReserveUSDC" | "expiryDays">, value: string) => {
-    onUpdatePolicy({ ...policy, [key]: Number(value), updatedAt: new Date().toISOString() });
+  const withSummary = (nextPolicy: PolicyDraft): PolicyDraft => ({
+    ...nextPolicy,
+    summary: `DCA ${nextPolicy.spendPerExecutionUSDC} ${assetTicker(nextPolicy.inputAsset)} into ${assetTicker(nextPolicy.outputAsset)} ${intervalLabel(nextPolicy).toLowerCase()} with ${formatSlippage(nextPolicy.slippageBps)} max slippage.`,
+  });
+
+  const updateNumber = (key: keyof Pick<PolicyDraft, "spendPerExecutionUSDC" | "monthlyCapUSDC" | "minimumReserveUSDC" | "expiryDays" | "intervalValue">, value: string) => {
+    onUpdatePolicy(withSummary({ ...policy, [key]: Number(value), updatedAt: new Date().toISOString() }));
+  };
+
+  const updateInputAsset = (inputAsset: string) => {
+    const outputAsset = inputAsset === policy.outputAsset ? pairedSwapAsset(inputAsset) : policy.outputAsset;
+    onUpdatePolicy(withSummary({ ...policy, inputAsset, outputAsset, allowedAssets: [inputAsset, outputAsset], updatedAt: new Date().toISOString() }));
+  };
+
+  const updateOutputAsset = (outputAsset: string) => {
+    const inputAsset = outputAsset === policy.inputAsset ? pairedSwapAsset(outputAsset) : policy.inputAsset;
+    onUpdatePolicy(withSummary({ ...policy, inputAsset, outputAsset, allowedAssets: [inputAsset, outputAsset], updatedAt: new Date().toISOString() }));
   };
 
   return (
@@ -347,21 +363,27 @@ function PolicyReviewScreen({ onSign, onUpdatePolicy, policy }: PolicyReviewScre
           </div>
           {isEditing ? (
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <PolicyInput label="Spend per execution" value={policy.spendPerExecutionUSDC} onChange={(value) => updateNumber("spendPerExecutionUSDC", value)} />
-              <PolicyInput label="Monthly cap" value={policy.monthlyCapUSDC} onChange={(value) => updateNumber("monthlyCapUSDC", value)} />
-              <PolicyInput label="Minimum reserve" value={policy.minimumReserveUSDC} onChange={(value) => updateNumber("minimumReserveUSDC", value)} />
+              <AssetSelect label="Input asset" value={policy.inputAsset} onChange={updateInputAsset} />
+              <AssetSelect label="Output asset" value={policy.outputAsset} onChange={updateOutputAsset} />
+              <PolicyInput label={`Spend per execution (${assetTicker(policy.inputAsset)})`} value={policy.spendPerExecutionUSDC} onChange={(value) => updateNumber("spendPerExecutionUSDC", value)} />
+              <PolicyInput label={`Period cap (${assetTicker(policy.inputAsset)})`} value={policy.monthlyCapUSDC} onChange={(value) => updateNumber("monthlyCapUSDC", value)} />
+              <PolicyInput label={`Minimum reserve (${assetTicker(policy.inputAsset)})`} value={policy.minimumReserveUSDC} onChange={(value) => updateNumber("minimumReserveUSDC", value)} />
               <PolicyInput label="Expiry days" value={policy.expiryDays} onChange={(value) => updateNumber("expiryDays", value)} />
-              <PolicyInput label="Slippage %" value={policy.slippageBps / 100} onChange={(value) => onUpdatePolicy({ ...policy, slippageBps: Number(value) * 100, updatedAt: new Date().toISOString() })} />
+              <PolicyInput label="Slippage %" value={policy.slippageBps / 100} onChange={(value) => onUpdatePolicy(withSummary({ ...policy, slippageBps: Number(value) * 100, updatedAt: new Date().toISOString() }))} />
+              <PolicyInput label="Interval" value={policy.intervalValue} onChange={(value) => updateNumber("intervalValue", value)} />
               <label className="grid gap-2 text-sm font-semibold text-rail-secondary">
-                Frequency
+                Interval unit
                 <select
                   className="min-h-12 rounded-lg border border-rail-border bg-rail-black px-3 text-rail-text outline-none focus:border-rail-green"
-                  onChange={(event) => onUpdatePolicy({ ...policy, frequency: event.target.value as PolicyDraft["frequency"], updatedAt: new Date().toISOString() })}
-                  value={policy.frequency}
+                  onChange={(event) => onUpdatePolicy(withSummary({ ...policy, intervalUnit: event.target.value as IntervalUnit, updatedAt: new Date().toISOString() }))}
+                  value={policy.intervalUnit}
                 >
-                  <option>Daily</option>
-                  <option>Weekly</option>
-                  <option>Monthly</option>
+                  <option value="seconds">Seconds</option>
+                  <option value="minutes">Minutes</option>
+                  <option value="hours">Hours</option>
+                  <option value="days">Days</option>
+                  <option value="weeks">Weeks</option>
+                  <option value="years">Years</option>
                 </select>
               </label>
             </div>
@@ -400,6 +422,25 @@ interface PolicyInputProps {
   label: string;
   onChange: (value: string) => void;
   value: number;
+}
+
+function AssetSelect({ label, onChange, value }: { label: string; onChange: (value: string) => void; value: string }) {
+  return (
+    <label className="grid gap-2 text-sm font-semibold text-rail-secondary">
+      {label}
+      <select
+        className="min-h-12 rounded-lg border border-rail-border bg-rail-black px-3 text-rail-text outline-none focus:border-rail-green"
+        onChange={(event) => onChange(event.target.value)}
+        value={value}
+      >
+        {supportedSwapAssets.map((asset) => (
+          <option key={asset} value={asset}>
+            {displayAsset(asset)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 function PolicyInput({ label, onChange, value }: PolicyInputProps) {
@@ -458,13 +499,13 @@ interface DashboardScreenProps {
   activity: ActivityEvent[];
   health: RailHealth | null;
   onCheckHealth: () => void;
-  onDeposit: (amount: number) => void;
+  onDeposit: (amount: number, asset: string) => void;
   onPause: () => void;
   onReset: () => void;
   onResume: () => void;
   onRevoke: () => void;
-  onRunAgentDemo: (scenario: AgentDemoScenario) => void;
-  onWithdraw: (amount: number) => void;
+  onRunAgentDemo: (scenario: AgentDemoScenario, amount?: number) => void;
+  onWithdraw: (amount: number, asset: string) => void;
   policy: PolicyDraft;
 }
 
@@ -473,6 +514,7 @@ function DashboardScreen({ account, activity, health, onCheckHealth, onDeposit, 
   const events = useMemo(() => (activity.length > 0 ? activity : simulateAgentActivity()), [activity]);
   const isPaused = policy.status === "paused";
   const isRevoked = policy.status === "revoked";
+  const inputBalance = policy.inputAsset === "ETH" ? account.vaultBalanceWETH : account.vaultBalanceUSDC;
 
   return (
     <ScreenFrame eyebrow="Dashboard" title="Your automation is live inside approved rails.">
@@ -486,9 +528,10 @@ function DashboardScreen({ account, activity, health, onCheckHealth, onDeposit, 
         <div className="absolute inset-0 bg-[linear-gradient(110deg,rgba(8,10,13,0.96),rgba(8,10,13,0.76)_52%,rgba(8,10,13,0.92)),radial-gradient(circle_at_76%_18%,rgba(53,229,140,0.16),transparent_34%)]" />
         <div className="relative grid gap-5 p-4 sm:p-5 xl:grid-cols-[0.9fr_1.1fr]">
           <div className="grid gap-5">
-            <div className="grid gap-4 sm:grid-cols-3">
-              <Metric icon={<Gauge size={18} />} label="Vault balance" value={formatUSDC(account.vaultBalanceUSDC)} />
-              <Metric icon={<Play size={18} />} label="Next action" value={isPaused || isRevoked ? "Stopped" : "Friday 09:00"} />
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <Metric icon={<Gauge size={18} />} label="rUSDC vault" value={formatAssetAmount(account.vaultBalanceUSDC, "USDC")} />
+              <Metric icon={<Gauge size={18} />} label="Mock WETH vault" value={formatAssetAmount(account.vaultBalanceWETH, "ETH")} />
+              <Metric icon={<Play size={18} />} label="Next action" value={isPaused || isRevoked ? "Stopped" : intervalLabel(policy)} />
               <Metric icon={<WalletCards size={18} />} label="Session key" value={account.sessionKeyStatus} />
             </div>
             <div className="rounded-lg border border-rail-border bg-rail-panel/90 p-5 backdrop-blur">
@@ -500,27 +543,29 @@ function DashboardScreen({ account, activity, health, onCheckHealth, onDeposit, 
                 <StatusPill label={policy.status} tone={policy.status === "active" ? "green" : policy.status === "revoked" ? "red" : "amber"} />
               </div>
               <div className="grid gap-3">
-                <PolicyField label="Spend" value={formatUSDC(policy.spendPerExecutionUSDC)} />
-                <PolicyField label="Allowed assets" value={`${policy.inputAsset} -> ${policy.outputAsset}`} />
+                <PolicyField label="Spend" value={formatAssetAmount(policy.spendPerExecutionUSDC, policy.inputAsset)} />
+                <PolicyField label="Allowed pair" value={policyRoute(policy)} />
+                <PolicyField label="Cadence" value={intervalLabel(policy)} />
+                <PolicyField label="Input vault" value={formatAssetAmount(inputBalance, policy.inputAsset)} />
                 <PolicyField label="Slippage limit" value={formatSlippage(policy.slippageBps)} />
-                <PolicyField label="Minimum reserve" value={formatUSDC(policy.minimumReserveUSDC)} />
+                <PolicyField label="Minimum reserve" value={formatAssetAmount(policy.minimumReserveUSDC, policy.inputAsset)} />
               </div>
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
                 <button
                   className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-green hover:text-rail-text"
-                  onClick={() => onDeposit(25)}
+                  onClick={() => onDeposit(25, policy.inputAsset)}
                   type="button"
                 >
                   <ArrowRight size={17} />
-                  Deposit 25 USDC
+                  Deposit 25 {assetTicker(policy.inputAsset)}
                 </button>
                 <button
                   className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-blue hover:text-rail-text"
-                  onClick={() => onWithdraw(10)}
+                  onClick={() => onWithdraw(10, policy.inputAsset)}
                   type="button"
                 >
                   <RotateCcw size={17} />
-                  Withdraw 10 USDC
+                  Withdraw 10 {assetTicker(policy.inputAsset)}
                 </button>
                 <button
                   className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-amber hover:text-rail-text"
@@ -542,7 +587,7 @@ function DashboardScreen({ account, activity, health, onCheckHealth, onDeposit, 
             </div>
           </div>
           <div className="grid gap-5">
-            <DemoOperatorPanel health={health} onCheckHealth={onCheckHealth} onRunAgentDemo={onRunAgentDemo} />
+            <DemoOperatorPanel health={health} onCheckHealth={onCheckHealth} onRunAgentDemo={onRunAgentDemo} policy={policy} />
             <div className="rounded-lg border border-rail-border bg-rail-black/90 p-5 backdrop-blur">
             <div className="mb-5 flex items-center justify-between gap-4">
               <div>
@@ -568,10 +613,14 @@ function DashboardScreen({ account, activity, health, onCheckHealth, onDeposit, 
 interface DemoOperatorPanelProps {
   health: RailHealth | null;
   onCheckHealth: () => void;
-  onRunAgentDemo: (scenario: AgentDemoScenario) => void;
+  onRunAgentDemo: (scenario: AgentDemoScenario, amount?: number) => void;
+  policy: PolicyDraft;
 }
 
-function DemoOperatorPanel({ health, onCheckHealth, onRunAgentDemo }: DemoOperatorPanelProps) {
+function DemoOperatorPanel({ health, onCheckHealth, onRunAgentDemo, policy }: DemoOperatorPanelProps) {
+  const [swapAmount, setSwapAmount] = useState(policy.spendPerExecutionUSDC);
+  const parsedAmount = Number.isFinite(swapAmount) && swapAmount > 0 ? swapAmount : policy.spendPerExecutionUSDC;
+
   return (
     <div className="rounded-lg border border-rail-border bg-rail-panel/90 p-5 backdrop-blur">
       <div className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
@@ -582,16 +631,23 @@ function DemoOperatorPanel({ health, onCheckHealth, onRunAgentDemo }: DemoOperat
         <StatusPill label={health?.ok ? "Backend healthy" : "Health unknown"} tone={health?.ok ? "green" : "amber"} />
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        <button className="min-h-12 rounded-lg border border-rail-green/40 px-4 text-sm font-semibold text-rail-green transition hover:bg-rail-green/10" onClick={() => onRunAgentDemo("valid")} type="button">
-          Run Valid DCA
+        <label className="grid gap-2 text-sm font-semibold text-rail-secondary sm:col-span-2">
+          Instant swap amount ({assetTicker(policy.inputAsset)})
+          <input
+            className="min-h-12 rounded-lg border border-rail-border bg-rail-black px-3 text-rail-text outline-none focus:border-rail-green"
+            min={0}
+            onChange={(event) => setSwapAmount(Number(event.target.value))}
+            type="number"
+            value={swapAmount}
+          />
+        </label>
+        <button className="min-h-12 rounded-lg border border-rail-green/40 px-4 text-sm font-semibold text-rail-green transition hover:bg-rail-green/10" onClick={() => onRunAgentDemo("valid", parsedAmount)} type="button">
+          Run Input Swap
         </button>
-        <button className="min-h-12 rounded-lg border border-rail-red/40 px-4 text-sm font-semibold text-rail-red transition hover:bg-rail-red/10" onClick={() => onRunAgentDemo("blocked-slippage")} type="button">
+        <button className="min-h-12 rounded-lg border border-rail-red/40 px-4 text-sm font-semibold text-rail-red transition hover:bg-rail-red/10" onClick={() => onRunAgentDemo("blocked-slippage", parsedAmount)} type="button">
           Trigger Slippage Block
         </button>
-        <button className="min-h-12 rounded-lg border border-rail-red/40 px-4 text-sm font-semibold text-rail-red transition hover:bg-rail-red/10" onClick={() => onRunAgentDemo("blocked-overspend")} type="button">
-          Trigger Overspend Block
-        </button>
-        <button className="min-h-12 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-blue hover:text-rail-text" onClick={onCheckHealth} type="button">
+        <button className="min-h-12 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-blue hover:text-rail-text sm:col-span-2" onClick={onCheckHealth} type="button">
           Check Backend Health
         </button>
       </div>

@@ -29,6 +29,7 @@ export function useRailWallet() {
     chainName: getSupportedChainName(chainId),
     ethBalance: balance ? Number(formatEther(balance.value)) : undefined,
     vaultBalanceUSDC: 0,
+    vaultBalanceWETH: 0,
     sessionKeyStatus: isConnected && walletStatus === "connected" ? "active" : "inactive",
     error: walletStatus === "wrong-network" ? `Switch to ${primaryChain.name} to create Rail policies.` : undefined,
   };

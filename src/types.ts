@@ -6,6 +6,7 @@ export type {
   AgentAction,
   AppStage,
   Frequency,
+  IntervalUnit,
   PolicyDraft,
   PolicyStatus,
   StrategyType,

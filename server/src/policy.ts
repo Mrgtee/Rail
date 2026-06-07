@@ -17,13 +17,35 @@ function readNumber(patterns: RegExp[], text: string, fallback: number) {
   return fallback;
 }
 
+function parseInterval(goal: string) {
+  const match = goal.match(/every\s+(?:(\d+(?:\.\d+)?)\s*)?(sec|secs|second|seconds|min|mins|minute|minutes|hour|hours|day|days|week|weeks|year|years)/);
+  const rawUnit = match?.[2];
+  const intervalValue = Math.max(1, Math.floor(Number(match?.[1] ?? 1)));
+
+  if (!rawUnit) {
+    if (goal.includes("daily")) return { intervalValue: 1, intervalUnit: "days" as const, frequency: "Daily" as const };
+    if (goal.includes("month")) return { intervalValue: 30, intervalUnit: "days" as const, frequency: "Monthly" as const };
+    return { intervalValue: 1, intervalUnit: "weeks" as const, frequency: "Weekly" as const };
+  }
+
+  const intervalUnit = rawUnit.startsWith("sec") ? "seconds" : rawUnit.startsWith("min") ? "minutes" : rawUnit.startsWith("hour") ? "hours" : rawUnit.startsWith("day") ? "days" : rawUnit.startsWith("week") ? "weeks" : "years";
+  const frequency = intervalUnit === "days" ? "Daily" : intervalUnit === "years" ? "Monthly" : "Weekly";
+  return { intervalValue, intervalUnit, frequency } as const;
+}
+
+function detectOutputAsset(goal: string) {
+  if (goal.includes("into usdc") || goal.includes("to usdc")) return "USDC";
+  return "ETH";
+}
+
 export function deterministicPolicyDraft(request: PolicyDraftRequest): RailPolicy {
   const goal = request.goal.toLowerCase();
-  const spend = readNumber([/(\d+(?:\.\d+)?)\s*usdc/, /spend\s+(\d+(?:\.\d+)?)/], goal, 20);
-  const reserve = readNumber([/keep\s+(\d+(?:\.\d+)?)\s*usdc/, /reserve\s+(\d+(?:\.\d+)?)\s*usdc/], goal, 50);
+  const spend = readNumber([/(\d+(?:\.\d+)?)\s*(?:usdc|eth|weth)/, /spend\s+(\d+(?:\.\d+)?)/], goal, 20);
+  const reserve = readNumber([/keep\s+(\d+(?:\.\d+)?)\s*(?:usdc|eth|weth)/, /reserve\s+(\d+(?:\.\d+)?)\s*(?:usdc|eth|weth)/], goal, 50);
   const slippagePercent = readNumber([/(\d+(?:\.\d+)?)%\s*slippage/, /slippage\s*(?:above|over|at)?\s*(\d+(?:\.\d+)?)%/], goal, 1);
-  const frequency = goal.includes("daily") ? "Daily" : goal.includes("month") ? "Monthly" : "Weekly";
-  const outputAsset = goal.includes("arb") ? "ARB" : "ETH";
+  const interval = parseInterval(goal);
+  const outputAsset = detectOutputAsset(goal);
+  const inputAsset = outputAsset === "USDC" ? "ETH" : "USDC";
   const createdAt = now();
 
   return {
@@ -31,11 +53,13 @@ export function deterministicPolicyDraft(request: PolicyDraftRequest): RailPolic
     ownerAddress: request.walletAddress,
     chainId: request.chainId === 421614 ? 421614 : 46630,
     strategy: "DCA",
-    inputAsset: "USDC",
+    inputAsset,
     outputAsset,
-    allowedAssets: ["USDC", outputAsset],
+    allowedAssets: [inputAsset, outputAsset],
     spendPerExecutionUSDC: spend,
-    frequency,
+    frequency: interval.frequency,
+    intervalValue: interval.intervalValue,
+    intervalUnit: interval.intervalUnit,
     monthlyCapUSDC: Math.max(spend * 5, 100),
     slippageBps: Math.round(slippagePercent * 100),
     minimumReserveUSDC: reserve,
@@ -46,13 +70,14 @@ export function deterministicPolicyDraft(request: PolicyDraftRequest): RailPolic
     createdAt,
     updatedAt: createdAt,
     warnings: ["AI drafts only. User signature is required before activation.", "Agent execution must pass PolicyVault checks."],
-    summary: `DCA ${spend} USDC into ${outputAsset} on a ${frequency.toLowerCase()} cadence with ${slippagePercent}% max slippage.`,
+    summary: `DCA ${spend} ${inputAsset} into ${outputAsset} every ${interval.intervalValue} ${interval.intervalUnit} with ${slippagePercent}% max slippage.`,
   };
 }
 
 export async function draftPolicy(request: PolicyDraftRequest) {
+  const fallback = deterministicPolicyDraft(request);
   if (!process.env.OPENAI_API_KEY) {
-    return { policy: deterministicPolicyDraft(request), provider: "deterministic-fallback" as const };
+    return { policy: fallback, provider: "deterministic-fallback" as const };
   }
 
   try {
@@ -60,7 +85,7 @@ export async function draftPolicy(request: PolicyDraftRequest) {
     const response = await (client.responses as any).create({
       model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
       input: [
-        { role: "system", content: "Extract a conservative Rail policy. Return only valid JSON matching the requested schema." },
+        { role: "system", content: "Extract a conservative Rail policy. Return only valid JSON matching the requested schema. Supported assets are USDC and ETH." },
         { role: "user", content: request.goal },
       ],
       text: {
@@ -70,14 +95,16 @@ export async function draftPolicy(request: PolicyDraftRequest) {
           schema: {
             type: "object",
             additionalProperties: false,
-            required: ["spendPerExecutionUSDC", "frequency", "monthlyCapUSDC", "slippageBps", "minimumReserveUSDC", "outputAsset"],
+            required: ["spendPerExecutionUSDC", "monthlyCapUSDC", "slippageBps", "minimumReserveUSDC", "inputAsset", "outputAsset", "intervalValue", "intervalUnit"],
             properties: {
               spendPerExecutionUSDC: { type: "number" },
-              frequency: { type: "string", enum: ["Daily", "Weekly", "Monthly"] },
               monthlyCapUSDC: { type: "number" },
               slippageBps: { type: "number" },
               minimumReserveUSDC: { type: "number" },
-              outputAsset: { type: "string" },
+              inputAsset: { type: "string", enum: ["USDC", "ETH"] },
+              outputAsset: { type: "string", enum: ["USDC", "ETH"] },
+              intervalValue: { type: "number" },
+              intervalUnit: { type: "string", enum: ["seconds", "minutes", "hours", "days", "weeks", "years"] },
             },
           },
         },
@@ -85,20 +112,28 @@ export async function draftPolicy(request: PolicyDraftRequest) {
     });
 
     const raw = response.output_text ? JSON.parse(response.output_text) : {};
-    const fallback = deterministicPolicyDraft(request);
+    const inputAsset = raw.inputAsset && raw.inputAsset !== raw.outputAsset ? raw.inputAsset : fallback.inputAsset;
+    const outputAsset = raw.outputAsset && raw.outputAsset !== inputAsset ? raw.outputAsset : fallback.outputAsset;
+    const intervalUnit = raw.intervalUnit || fallback.intervalUnit;
+    const frequency = intervalUnit === "days" ? "Daily" : intervalUnit === "years" ? "Monthly" : "Weekly";
 
     return {
       policy: {
         ...fallback,
         ...raw,
-        allowedAssets: ["USDC", raw.outputAsset || fallback.outputAsset],
+        inputAsset,
+        outputAsset,
+        allowedAssets: [inputAsset, outputAsset],
+        intervalValue: Math.max(1, Math.floor(Number(raw.intervalValue || fallback.intervalValue))),
+        intervalUnit,
+        frequency,
         updatedAt: now(),
       },
       provider: "openai-responses" as const,
     };
   } catch (error) {
     return {
-      policy: deterministicPolicyDraft(request),
+      policy: fallback,
       provider: "deterministic-fallback" as const,
       warning: error instanceof Error ? error.message : "OpenAI policy drafting failed",
     };

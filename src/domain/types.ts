@@ -20,6 +20,7 @@ export interface UserAccount {
   chainName?: string;
   ethBalance?: number;
   vaultBalanceUSDC: number;
+  vaultBalanceWETH: number;
   sessionKeyStatus: "inactive" | "active" | "expired";
   error?: string;
 }
@@ -45,6 +46,7 @@ export type PolicyStatus =
 
 export type StrategyType = "DCA" | "Rebalance" | "Stable parking";
 export type Frequency = "Daily" | "Weekly" | "Monthly";
+export type IntervalUnit = "seconds" | "minutes" | "hours" | "days" | "weeks" | "years";
 
 export interface PolicyDraft {
   id: string;
@@ -56,6 +58,8 @@ export interface PolicyDraft {
   allowedAssets: string[];
   spendPerExecutionUSDC: number;
   frequency: Frequency;
+  intervalValue: number;
+  intervalUnit: IntervalUnit;
   monthlyCapUSDC: number;
   slippageBps: number;
   minimumReserveUSDC: number;

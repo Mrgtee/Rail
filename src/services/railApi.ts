@@ -33,7 +33,7 @@ export async function draftPolicyFromAgent(goal: string, account: UserAccount): 
       walletAddress: account.address,
       chainId: account.chainId ?? 46630,
       goal,
-      supportedAssets: ["USDC", "ETH", "ARB"],
+      supportedAssets: ["USDC", "ETH"],
     });
 
     if (!result.ok) {
@@ -46,6 +46,10 @@ export async function draftPolicyFromAgent(goal: string, account: UserAccount): 
   }
 }
 
+function policyInputVaultBalance(policy: PolicyDraft, account: UserAccount) {
+  return policy.inputAsset === "ETH" ? account.vaultBalanceWETH : account.vaultBalanceUSDC;
+}
+
 export async function simulateAgentAction(policy: PolicyDraft, account: UserAccount, overrides?: Partial<{ amountUSDC: number; slippageBps: number; projectedReserveUSDC: number }>) {
   return postJson<{ ok: boolean; status: "executable" | "blocked"; reason: string; rule: string; attempted: string }>("/api/agent/simulate", {
     walletAddress: account.address,
@@ -56,7 +60,7 @@ export async function simulateAgentAction(policy: PolicyDraft, account: UserAcco
       outputAsset: policy.outputAsset,
       amountUSDC: overrides?.amountUSDC ?? policy.spendPerExecutionUSDC,
       slippageBps: overrides?.slippageBps ?? policy.slippageBps,
-      projectedReserveUSDC: overrides?.projectedReserveUSDC ?? Math.max(0, account.vaultBalanceUSDC - policy.spendPerExecutionUSDC),
+      projectedReserveUSDC: overrides?.projectedReserveUSDC ?? Math.max(0, policyInputVaultBalance(policy, account) - (overrides?.amountUSDC ?? policy.spendPerExecutionUSDC)),
     },
   });
 }
@@ -71,7 +75,7 @@ export async function executeAgentAction(policy: PolicyDraft, account: UserAccou
       outputAsset: policy.outputAsset,
       amountUSDC: overrides?.amountUSDC ?? policy.spendPerExecutionUSDC,
       slippageBps: overrides?.slippageBps ?? policy.slippageBps,
-      projectedReserveUSDC: overrides?.projectedReserveUSDC ?? Math.max(0, account.vaultBalanceUSDC - policy.spendPerExecutionUSDC),
+      projectedReserveUSDC: overrides?.projectedReserveUSDC ?? Math.max(0, policyInputVaultBalance(policy, account) - (overrides?.amountUSDC ?? policy.spendPerExecutionUSDC)),
     },
   });
 }

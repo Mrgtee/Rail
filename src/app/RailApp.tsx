@@ -14,6 +14,7 @@ import {
   simulateAgentActivity,
   wrongNetworkAccount,
 } from "../domain/mockRail";
+import { assetTicker } from "../domain/assets";
 import type { ActivityEvent, AppStage, PolicyDraft, UserAccount } from "../domain/types";
 import { contractAddresses } from "../contracts/addresses";
 import { useRailContracts } from "../contracts/useRailContracts";
@@ -36,12 +37,14 @@ export function RailApp() {
   const {
     canWriteContracts,
     createPolicy: createPolicyOnchain,
-    depositUSDC,
+    depositAsset,
     pausePolicy: pausePolicyOnchain,
     resumePolicy: resumePolicyOnchain,
     revokePolicy: revokePolicyOnchain,
+    refreshBalances,
     vaultBalanceUSDC,
-    withdrawUSDC,
+    vaultBalanceWETH,
+    withdrawAsset,
   } = useRailContracts(account);
   const activePolicy = policy ?? samplePolicy;
 
@@ -133,26 +136,42 @@ export function RailApp() {
       });
   };
 
-  const handleRunAgentDemo = (scenario: AgentDemoScenario) => {
+  const inputVaultBalance = (targetPolicy: PolicyDraft, targetAccount: UserAccount) =>
+    targetPolicy.inputAsset === "ETH" ? targetAccount.vaultBalanceWETH : targetAccount.vaultBalanceUSDC;
+
+  const handleRunAgentDemo = (scenario: AgentDemoScenario, requestedAmount?: number) => {
+    const amount = requestedAmount && requestedAmount > 0 ? requestedAmount : activePolicy.spendPerExecutionUSDC;
+    const baseProjectedReserve = Math.max(0, inputVaultBalance(activePolicy, account) - amount);
     const overrides =
       scenario === "blocked-slippage"
-        ? { slippageBps: activePolicy.slippageBps + 75 }
+        ? { amountUSDC: amount, slippageBps: activePolicy.slippageBps + 75, projectedReserveUSDC: baseProjectedReserve }
         : scenario === "blocked-overspend"
-          ? { amountUSDC: activePolicy.spendPerExecutionUSDC + 15 }
+          ? { amountUSDC: activePolicy.spendPerExecutionUSDC + 15, projectedReserveUSDC: Math.max(0, inputVaultBalance(activePolicy, account) - activePolicy.spendPerExecutionUSDC - 15) }
           : {
-              amountUSDC: activePolicy.spendPerExecutionUSDC,
+              amountUSDC: amount,
               slippageBps: Math.max(1, activePolicy.slippageBps - 25),
-              projectedReserveUSDC: Math.max(activePolicy.minimumReserveUSDC, account.vaultBalanceUSDC - activePolicy.spendPerExecutionUSDC),
+              projectedReserveUSDC: baseProjectedReserve,
             };
 
     void executeAgentAction(activePolicy, account, overrides)
       .then((result) => {
         pushActivity(result.activity);
         if (result.status === "executed") {
+          const executedAmount = overrides.amountUSDC ?? activePolicy.spendPerExecutionUSDC;
           setAccount((current) => ({
             ...current,
-            vaultBalanceUSDC: Math.max(0, current.vaultBalanceUSDC - (overrides.amountUSDC ?? activePolicy.spendPerExecutionUSDC)),
+            vaultBalanceUSDC:
+              activePolicy.inputAsset === "USDC"
+                ? Math.max(0, current.vaultBalanceUSDC - executedAmount)
+                : current.vaultBalanceUSDC + (activePolicy.outputAsset === "USDC" ? executedAmount : 0),
+            vaultBalanceWETH:
+              activePolicy.inputAsset === "ETH"
+                ? Math.max(0, current.vaultBalanceWETH - executedAmount)
+                : current.vaultBalanceWETH + (activePolicy.outputAsset === "ETH" ? executedAmount : 0),
           }));
+          if (!isDemoWallet && canWriteContracts) {
+            void refreshBalances();
+          }
         }
       })
       .catch((error) => {
@@ -165,7 +184,7 @@ export function RailApp() {
               attempted: `dca-swap: ${overrides.amountUSDC ?? activePolicy.spendPerExecutionUSDC} ${activePolicy.inputAsset} -> ${activePolicy.outputAsset}`,
               reason: error instanceof Error ? error.message : "Backend could not submit the onchain agent action.",
               rule: "AgentExecutor transaction",
-              fundsMoved: "0 USDC",
+              fundsMoved: `0 ${assetTicker(activePolicy.inputAsset)}`,
               actionType: "dca-swap",
               simulationResult: "failed",
               transaction: {
@@ -192,7 +211,7 @@ export function RailApp() {
                 : "Action exceeds spend per execution."
               : "Action matched the active policy.",
             rule: isBlocked ? (scenario === "blocked-slippage" ? "Max slippage" : "Max spend per execution") : "PolicyVault checks",
-            fundsMoved: isBlocked ? "0 USDC" : `${amount} USDC`,
+            fundsMoved: isBlocked ? `0 ${assetTicker(activePolicy.inputAsset)}` : `${amount} ${assetTicker(activePolicy.inputAsset)}`,
             actionType: "dca-swap",
             simulationResult: isBlocked ? "blocked" : "passed",
             transaction: {
@@ -264,12 +283,16 @@ export function RailApp() {
 
 
   useEffect(() => {
-    if (vaultBalanceUSDC === undefined) {
+    if (vaultBalanceUSDC === undefined && vaultBalanceWETH === undefined) {
       return;
     }
 
-    setAccount((current) => ({ ...current, vaultBalanceUSDC: vaultBalanceUSDC ?? current.vaultBalanceUSDC }));
-  }, [vaultBalanceUSDC]);
+    setAccount((current) => ({
+      ...current,
+      vaultBalanceUSDC: vaultBalanceUSDC ?? current.vaultBalanceUSDC,
+      vaultBalanceWETH: vaultBalanceWETH ?? current.vaultBalanceWETH,
+    }));
+  }, [vaultBalanceUSDC, vaultBalanceWETH]);
 
   useEffect(() => {
     if (isDemoWallet) {
@@ -279,6 +302,7 @@ export function RailApp() {
     setAccount((current) => ({
       ...railWallet.account,
       vaultBalanceUSDC: current.vaultBalanceUSDC || demoAccount.vaultBalanceUSDC,
+      vaultBalanceWETH: current.vaultBalanceWETH || demoAccount.vaultBalanceWETH,
     }));
 
     if (railWallet.account.status === "connected" && stage === "connect") {
@@ -417,20 +441,24 @@ export function RailApp() {
               onCheckHealth={handleCheckHealth}
               onConnect={handleConnectWallet}
               onConnectWrongNetwork={handleConnectWrongNetwork}
-              onDeposit={(amount) => {
+              onDeposit={(amount, asset) => {
                 void (async () => {
                   if (!isDemoWallet && canWriteContracts) {
-                    const result = await depositUSDC(amount);
-                    setAccount((current) => ({ ...current, vaultBalanceUSDC: current.vaultBalanceUSDC + amount }));
+                    const result = await depositAsset(asset, amount);
+                    setAccount((current) => ({
+                      ...current,
+                      vaultBalanceUSDC: asset === "USDC" ? current.vaultBalanceUSDC + amount : current.vaultBalanceUSDC,
+                      vaultBalanceWETH: asset === "ETH" ? current.vaultBalanceWETH + amount : current.vaultBalanceWETH,
+                    }));
                     pushActivity(
                       createLocalActivity({
                         kind: "executed",
                         policyId: activePolicy.id,
-                        title: `Deposited ${amount} rUSDC onchain`,
-                        attempted: "Mint demo rUSDC, approve PolicyVault, deposit funds",
+                        title: `Deposited ${amount} ${assetTicker(asset)} onchain`,
+                        attempted: `Mint demo ${assetTicker(asset)}, approve PolicyVault, deposit funds`,
                         reason: "Wallet confirmed the test token mint, allowance approval, and PolicyVault deposit.",
                         rule: "User-confirmed deposit",
-                        fundsMoved: `${amount} USDC`,
+                        fundsMoved: `${amount} ${assetTicker(asset)}`,
                         actionType: "deposit",
                         txHash: result.depositHash,
                         transaction: {
@@ -444,15 +472,19 @@ export function RailApp() {
                     return;
                   }
 
-                  setAccount((current) => ({ ...current, vaultBalanceUSDC: current.vaultBalanceUSDC + amount }));
+                  setAccount((current) => ({
+                    ...current,
+                    vaultBalanceUSDC: asset === "USDC" ? current.vaultBalanceUSDC + amount : current.vaultBalanceUSDC,
+                    vaultBalanceWETH: asset === "ETH" ? current.vaultBalanceWETH + amount : current.vaultBalanceWETH,
+                  }));
                   pushActivity(
                     createLocalActivity({
                       kind: "executed",
-                      title: `Deposited ${amount} USDC`,
+                      title: `Deposited ${amount} ${assetTicker(asset)}`,
                       attempted: "Deposit funds into PolicyVault",
                       reason: "Vault balance updated in demo mode.",
                       rule: "User-confirmed deposit",
-                      fundsMoved: `${amount} USDC`,
+                      fundsMoved: `${amount} ${assetTicker(asset)}`,
                       actionType: "deposit",
                     }),
                   );
@@ -465,7 +497,7 @@ export function RailApp() {
                       attempted: "Deposit funds into PolicyVault",
                       reason: error instanceof Error ? error.message : "Deposit transaction failed.",
                       rule: "Token approval and vault deposit",
-                      fundsMoved: "0 USDC",
+                      fundsMoved: `0 ${assetTicker(asset)}`,
                       actionType: "deposit",
                       simulationResult: "failed",
                       transaction: { chainId: activePolicy.chainId, contractAddress: contractAddresses.policyVault, status: "failed" },
@@ -492,20 +524,24 @@ export function RailApp() {
               onSign={handleSignPolicy}
               onSwitchNetwork={handleSwitchNetwork}
               onUpdatePolicy={setPolicy}
-              onWithdraw={(amount) => {
+              onWithdraw={(amount, asset) => {
                 void (async () => {
                   if (!isDemoWallet && canWriteContracts) {
-                    const txHash = await withdrawUSDC(amount);
-                    setAccount((current) => ({ ...current, vaultBalanceUSDC: Math.max(0, current.vaultBalanceUSDC - amount) }));
+                    const txHash = await withdrawAsset(asset, amount);
+                    setAccount((current) => ({
+                      ...current,
+                      vaultBalanceUSDC: asset === "USDC" ? Math.max(0, current.vaultBalanceUSDC - amount) : current.vaultBalanceUSDC,
+                      vaultBalanceWETH: asset === "ETH" ? Math.max(0, current.vaultBalanceWETH - amount) : current.vaultBalanceWETH,
+                    }));
                     pushActivity(
                       createLocalActivity({
                         kind: "executed",
                         policyId: activePolicy.id,
-                        title: `Withdrew ${amount} USDC onchain`,
+                        title: `Withdrew ${amount} ${assetTicker(asset)} onchain`,
                         attempted: "Withdraw funds from PolicyVault",
                         reason: "Wallet confirmed owner-only vault withdrawal.",
                         rule: "Owner-only withdrawal",
-                        fundsMoved: `${amount} USDC`,
+                        fundsMoved: `${amount} ${assetTicker(asset)}`,
                         actionType: "withdraw",
                         txHash,
                         transaction: {
@@ -519,15 +555,19 @@ export function RailApp() {
                     return;
                   }
 
-                  setAccount((current) => ({ ...current, vaultBalanceUSDC: Math.max(0, current.vaultBalanceUSDC - amount) }));
+                  setAccount((current) => ({
+                    ...current,
+                    vaultBalanceUSDC: asset === "USDC" ? Math.max(0, current.vaultBalanceUSDC - amount) : current.vaultBalanceUSDC,
+                    vaultBalanceWETH: asset === "ETH" ? Math.max(0, current.vaultBalanceWETH - amount) : current.vaultBalanceWETH,
+                  }));
                   pushActivity(
                     createLocalActivity({
                       kind: "executed",
-                      title: `Withdrew ${amount} USDC`,
+                      title: `Withdrew ${amount} ${assetTicker(asset)}`,
                       attempted: "Withdraw funds from PolicyVault",
                       reason: "User withdrawal completed in demo mode.",
                       rule: "Owner-only withdrawal",
-                      fundsMoved: `${amount} USDC`,
+                      fundsMoved: `${amount} ${assetTicker(asset)}`,
                       actionType: "withdraw",
                     }),
                   );
@@ -540,7 +580,7 @@ export function RailApp() {
                       attempted: "Withdraw funds from PolicyVault",
                       reason: error instanceof Error ? error.message : "Withdrawal transaction failed.",
                       rule: "Owner-only withdrawal",
-                      fundsMoved: "0 USDC",
+                      fundsMoved: `0 ${assetTicker(asset)}`,
                       actionType: "withdraw",
                       simulationResult: "failed",
                       transaction: { chainId: activePolicy.chainId, contractAddress: contractAddresses.policyVault, status: "failed" },

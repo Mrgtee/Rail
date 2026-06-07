@@ -50,6 +50,12 @@ function configuredAddress(name: string, fallbackName?: string) {
   return requiredEnv(name, fallbackName) as Address;
 }
 
+
+function decimalsForAsset(asset: string) {
+  const normalized = asset.toUpperCase();
+  return normalized === "ETH" || normalized === "WETH" ? 18 : 6;
+}
+
 function onchainPolicyId(policyId: string) {
   if (!/^\d+$/.test(policyId)) {
     throw new Error("Policy does not have an onchain numeric ID yet.");
@@ -103,9 +109,9 @@ export async function submitAgentExecution(request: AgentActionRequest) {
     args: [
       onchainPolicyId(request.policy.id),
       configuredAddress("MOCK_ROUTER_ADDRESS", "VITE_MOCK_ROUTER_ADDRESS"),
-      parseUnits(String(request.action.amountUSDC), 6),
+      parseUnits(String(request.action.amountUSDC), decimalsForAsset(request.action.inputAsset)),
       request.action.slippageBps,
-      parseUnits(String(request.action.projectedReserveUSDC), 6),
+      parseUnits(String(request.action.projectedReserveUSDC), decimalsForAsset(request.action.inputAsset)),
       "0x",
     ],
   });

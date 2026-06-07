@@ -1,5 +1,5 @@
 import { primaryChain } from "./chains";
-import type { ActivityEvent, ActivationStep, PolicyDraft, UserAccount } from "./types";
+import type { ActivityEvent, ActivationStep, IntervalUnit, PolicyDraft, UserAccount } from "./types";
 
 const wait = (ms: number) =>
   new Promise<void>((resolve) => {
@@ -7,7 +7,7 @@ const wait = (ms: number) =>
   });
 
 export const defaultGoal =
-  "DCA 20 USDC into ETH every week. Keep 50 USDC liquid. Stop if slippage is above 1%.";
+  "DCA 20 USDC into ETH every 30 seconds. Keep 50 USDC liquid. Stop if slippage is above 1%.";
 
 export const draftingSteps = [
   "Reading goal",
@@ -43,6 +43,7 @@ export const activationSteps: ActivationStep[] = [
 export const disconnectedAccount: UserAccount = {
   status: "disconnected",
   vaultBalanceUSDC: 0,
+  vaultBalanceWETH: 0,
   sessionKeyStatus: "inactive",
 };
 
@@ -54,6 +55,7 @@ export const demoAccount: UserAccount = {
   chainName: primaryChain.name,
   ethBalance: 1.42,
   vaultBalanceUSDC: 142.8,
+  vaultBalanceWETH: 0.42,
   sessionKeyStatus: "active",
 };
 
@@ -77,6 +79,8 @@ export const samplePolicy: PolicyDraft = {
   allowedAssets: ["USDC", "ETH"],
   spendPerExecutionUSDC: 20,
   frequency: "Weekly",
+  intervalValue: 30,
+  intervalUnit: "seconds",
   monthlyCapUSDC: 100,
   slippageBps: 100,
   minimumReserveUSDC: 50,
@@ -87,7 +91,7 @@ export const samplePolicy: PolicyDraft = {
   createdAt: now,
   updatedAt: now,
   warnings: ["The agent can execute only through PolicyVault checks."],
-  summary: "Weekly DCA guardrails for swapping USDC into ETH while preserving a 50 USDC reserve.",
+  summary: "DCA guardrails for swapping USDC into ETH every 30 seconds while preserving a 50 USDC reserve.",
 };
 
 export const dashboardEvents: ActivityEvent[] = [
@@ -146,25 +150,33 @@ export async function generatePolicy(goalText: string, ownerAddress?: string): P
   await wait(650);
 
   const lowerGoal = goalText.toLowerCase();
-  const spendMatch = lowerGoal.match(/(\d+(?:\.\d+)?)\s*usdc/);
+  const spendMatch = lowerGoal.match(/(\d+(?:\.\d+)?)\s*(usdc|eth|weth)/);
   const reserveMatch = lowerGoal.match(/keep\s+(\d+(?:\.\d+)?)\s*usdc|reserve\s+(\d+(?:\.\d+)?)\s*usdc/);
   const slippageMatch = lowerGoal.match(/(\d+(?:\.\d+)?)%\s*slippage|slippage\s*(?:is\s*)?(?:above\s*)?(\d+(?:\.\d+)?)%/);
 
   const spend = spendMatch ? Number(spendMatch[1]) : samplePolicy.spendPerExecutionUSDC;
   const reserve = reserveMatch ? Number(reserveMatch[1] ?? reserveMatch[2]) : samplePolicy.minimumReserveUSDC;
   const slippage = slippageMatch ? Number(slippageMatch[1] ?? slippageMatch[2]) * 100 : samplePolicy.slippageBps;
-  const frequency = lowerGoal.includes("daily") ? "Daily" : lowerGoal.includes("month") ? "Monthly" : "Weekly";
+  const interval = parseInterval(lowerGoal);
+  const outputAsset = detectOutputAsset(lowerGoal);
+  const inputAsset = outputAsset === "USDC" ? "ETH" : "USDC";
 
   return {
     ...samplePolicy,
     id: goalText.length > 0 ? "rail-policy-dca-demo" : samplePolicy.id,
     ownerAddress,
+    inputAsset,
+    outputAsset,
+    allowedAssets: [inputAsset, outputAsset],
     spendPerExecutionUSDC: spend,
     minimumReserveUSDC: reserve,
     slippageBps: slippage,
-    frequency,
+    frequency: interval.frequency,
+    intervalValue: interval.intervalValue,
+    intervalUnit: interval.intervalUnit,
     monthlyCapUSDC: Math.max(spend * 5, samplePolicy.monthlyCapUSDC),
     status: "awaiting-signature",
+    summary: `DCA ${spend} ${inputAsset} into ${outputAsset} every ${interval.intervalValue} ${interval.intervalUnit} with ${slippage / 100}% max slippage.`,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -187,6 +199,27 @@ export async function activatePolicy(policy: PolicyDraft): Promise<PolicyDraft> 
     status: "active",
     updatedAt: new Date().toISOString(),
   };
+}
+
+export function parseInterval(goal: string): { intervalValue: number; intervalUnit: IntervalUnit; frequency: PolicyDraft["frequency"] } {
+  const match = goal.match(/every\s+(?:(\d+(?:\.\d+)?)\s*)?(sec|secs|second|seconds|min|mins|minute|minutes|hour|hours|day|days|week|weeks|year|years)/);
+  const rawUnit = match?.[2];
+  const intervalValue = Math.max(1, Math.floor(Number(match?.[1] ?? 1)));
+
+  if (!rawUnit) {
+    if (goal.includes("daily")) return { intervalValue: 1, intervalUnit: "days", frequency: "Daily" };
+    if (goal.includes("month")) return { intervalValue: 30, intervalUnit: "days", frequency: "Monthly" };
+    return { intervalValue: 1, intervalUnit: "weeks", frequency: "Weekly" };
+  }
+
+  const intervalUnit = rawUnit.startsWith("sec") ? "seconds" : rawUnit.startsWith("min") ? "minutes" : rawUnit.startsWith("hour") ? "hours" : rawUnit.startsWith("day") ? "days" : rawUnit.startsWith("week") ? "weeks" : "years";
+  const frequency = intervalUnit === "days" ? "Daily" : intervalUnit === "years" ? "Monthly" : "Weekly";
+  return { intervalValue, intervalUnit, frequency };
+}
+
+function detectOutputAsset(goal: string) {
+  if (goal.includes("into usdc") || goal.includes("to usdc")) return "USDC";
+  return "ETH";
 }
 
 export function simulateAgentActivity(): ActivityEvent[] {
