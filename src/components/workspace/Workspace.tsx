@@ -58,6 +58,7 @@ interface ProductWorkspaceProps {
   onSwitchNetwork: () => void;
   onUpdatePolicy: (policy: PolicyDraft) => void;
   onWithdraw: (amount: number) => void;
+  isLiveMode: boolean;
   policy: PolicyDraft;
   stage: AppStage;
 }
@@ -85,6 +86,7 @@ export function ProductWorkspace({
   onSwitchNetwork,
   onUpdatePolicy,
   onWithdraw,
+  isLiveMode,
   policy,
   stage,
 }: ProductWorkspaceProps) {
@@ -97,7 +99,7 @@ export function ProductWorkspace({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <StatusPill label={`${primaryChain.name} · ${primaryChain.id}`} tone="blue" />
-          <StatusPill label="Demo mode" tone="amber" />
+          <StatusPill label={isLiveMode ? "Onchain mode" : "Fallback mode"} tone={isLiveMode ? "green" : "amber"} />
           {account.status === "connected" ? <StatusPill label={`Wallet ${shortAddress(account.address)}`} tone="green" /> : null}
           {account.status === "wrong-network" ? <StatusPill label="Wrong network" tone="red" /> : null}
         </div>
@@ -163,7 +165,7 @@ function WelcomePanel({ onLaunch }: WelcomePanelProps) {
         <MiniProof label="Policy decides" value="Onchain check" />
       </div>
       <RailButton className="mt-8" icon={<ArrowRight size={17} />} onClick={onLaunch} size="lg">
-        Start demo
+        Start Rail
       </RailButton>
     </ScreenFrame>
   );
@@ -211,13 +213,8 @@ function ConnectScreen({ account, onConnect, onConnectWrongNetwork, onSwitchNetw
               onClick={onConnect}
               size="lg"
             >
-              {isConnecting ? "Connecting..." : "Connect Demo Wallet"}
+              {isConnecting ? "Connecting..." : "Connect Wallet"}
             </RailButton>
-            {account.address ? (
-            <a className="mt-5 block font-mono text-sm text-rail-blue hover:text-rail-text" href={explorerAddressUrl(account.address, account.chainId)} rel="noreferrer" target="_blank">
-              {shortAddress(account.address)} · {account.ethBalance?.toFixed(4) ?? "0.0000"} ETH
-            </a>
-          ) : null}
           {isWrongNetwork ? (
               <button
                 className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-5 text-sm font-semibold text-rail-text transition hover:border-rail-blue"
@@ -579,7 +576,7 @@ function DemoOperatorPanel({ health, onCheckHealth, onRunAgentDemo }: DemoOperat
     <div className="rounded-lg border border-rail-border bg-rail-panel/90 p-5 backdrop-blur">
       <div className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div>
-          <p className="text-sm font-semibold text-rail-secondary">Demo Operator</p>
+          <p className="text-sm font-semibold text-rail-secondary">Agent Operator</p>
           <h3 className="mt-1 text-2xl font-semibold text-rail-text">Agent action controls</h3>
         </div>
         <StatusPill label={health?.ok ? "Backend healthy" : "Health unknown"} tone={health?.ok ? "green" : "amber"} />
@@ -602,7 +599,7 @@ function DemoOperatorPanel({ health, onCheckHealth, onRunAgentDemo }: DemoOperat
         <div className="mt-4 grid gap-2 text-xs text-rail-secondary sm:grid-cols-3">
           <span>OpenAI: {health.openaiConfigured ? "configured" : "fallback"}</span>
           <span>RPC: {health.robinhoodRpcConfigured ? "configured" : "fallback"}</span>
-          <span>Contracts: {health.contractsConfigured ? "configured" : "demo"}</span>
+          <span>Contracts: {health.contractsConfigured ? "configured" : "fallback"}</span>
         </div>
       ) : null}
     </div>

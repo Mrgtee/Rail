@@ -210,6 +210,10 @@ updateEnvFile(envPath, {
   VITE_MOCK_ROUTER_ADDRESS: mockRouter.address,
   POLICY_VAULT_ADDRESS: policyVault.address,
   AGENT_EXECUTOR_ADDRESS: agentExecutor.address,
+  STRATEGY_REGISTRY_ADDRESS: strategyRegistry.address,
+  MOCK_USDC_ADDRESS: mockUSDC.address,
+  MOCK_WETH_ADDRESS: mockWETH.address,
+  MOCK_ROUTER_ADDRESS: mockRouter.address,
 });
 
 console.log(`Wrote ${path.relative(root, deploymentPath)}`);

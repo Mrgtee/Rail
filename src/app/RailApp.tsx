@@ -15,6 +15,7 @@ import {
   wrongNetworkAccount,
 } from "../domain/mockRail";
 import type { ActivityEvent, AppStage, PolicyDraft, UserAccount } from "../domain/types";
+import { contractAddresses } from "../contracts/addresses";
 import { useRailContracts } from "../contracts/useRailContracts";
 import { draftPolicyFromAgent, executeAgentAction, fetchRailHealth, type AgentDemoScenario, type RailHealth } from "../services/railApi";
 import { useRailWallet } from "../wallet/useRailWallet";
@@ -32,7 +33,16 @@ export function RailApp() {
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [health, setHealth] = useState<RailHealth | null>(null);
 
-  const { canWriteContracts, createPolicy: createPolicyOnchain, vaultBalanceUSDC } = useRailContracts(account);
+  const {
+    canWriteContracts,
+    createPolicy: createPolicyOnchain,
+    depositUSDC,
+    pausePolicy: pausePolicyOnchain,
+    resumePolicy: resumePolicyOnchain,
+    revokePolicy: revokePolicyOnchain,
+    vaultBalanceUSDC,
+    withdrawUSDC,
+  } = useRailContracts(account);
   const activePolicy = policy ?? samplePolicy;
 
   const moveToApp = (nextStage: AppStage) => {
@@ -145,7 +155,29 @@ export function RailApp() {
           }));
         }
       })
-      .catch(() => {
+      .catch((error) => {
+        if (!isDemoWallet && canWriteContracts) {
+          pushActivity(
+            createLocalActivity({
+              kind: "failed",
+              policyId: activePolicy.id,
+              title: "Agent execution failed",
+              attempted: `dca-swap: ${overrides.amountUSDC ?? activePolicy.spendPerExecutionUSDC} ${activePolicy.inputAsset} -> ${activePolicy.outputAsset}`,
+              reason: error instanceof Error ? error.message : "Backend could not submit the onchain agent action.",
+              rule: "AgentExecutor transaction",
+              fundsMoved: "0 USDC",
+              actionType: "dca-swap",
+              simulationResult: "failed",
+              transaction: {
+                chainId: activePolicy.chainId,
+                contractAddress: activePolicy.contractAddress,
+                status: "failed",
+              },
+            }),
+          );
+          return;
+        }
+
         const isBlocked = scenario !== "valid";
         const amount = overrides.amountUSDC ?? activePolicy.spendPerExecutionUSDC;
         pushActivity(
@@ -175,7 +207,7 @@ export function RailApp() {
       });
   };
 
-  const updatePolicyStatus = (status: PolicyDraft["status"], title: string, reason: string) => {
+  const updatePolicyStatus = (status: PolicyDraft["status"], title: string, reason: string, txHash?: string) => {
     const updatedPolicy = { ...activePolicy, status, updatedAt: new Date().toISOString() };
     setPolicy(updatedPolicy);
     pushActivity(
@@ -188,8 +220,46 @@ export function RailApp() {
         rule: "User confirmation",
         fundsMoved: "0 USDC",
         actionType: "policy-update",
+        txHash,
+        transaction: {
+          chainId: updatedPolicy.chainId,
+          contractAddress: updatedPolicy.contractAddress,
+          hash: txHash,
+          status: txHash ? "confirmed" : "not-submitted",
+        },
       }),
     );
+  };
+
+  const handlePolicyStatusChange = (status: Extract<PolicyDraft["status"], "active" | "paused" | "revoked">, title: string, reason: string) => {
+    void (async () => {
+      let txHash: string | undefined;
+      if (!isDemoWallet && canWriteContracts) {
+        if (status === "paused") txHash = await pausePolicyOnchain(activePolicy);
+        if (status === "active") txHash = await resumePolicyOnchain(activePolicy);
+        if (status === "revoked") txHash = await revokePolicyOnchain(activePolicy);
+      }
+      updatePolicyStatus(status, title, txHash ? `${reason} Confirmed onchain.` : reason, txHash);
+    })().catch((error) => {
+      pushActivity(
+        createLocalActivity({
+          kind: "failed",
+          policyId: activePolicy.id,
+          title: `${title} failed`,
+          attempted: `${activePolicy.strategy} policy status update`,
+          reason: error instanceof Error ? error.message : "Policy status update failed.",
+          rule: "PolicyVault owner transaction",
+          fundsMoved: "0 USDC",
+          actionType: "policy-update",
+          simulationResult: "failed",
+          transaction: {
+            chainId: activePolicy.chainId,
+            contractAddress: activePolicy.contractAddress,
+            status: "failed",
+          },
+        }),
+      );
+    });
   };
 
 
@@ -258,12 +328,24 @@ export function RailApp() {
       void signPolicy(activePolicy)
         .then(async (pendingPolicy) => {
           let txHash: string | undefined;
+          let onchainPolicyId: string | undefined;
 
           if (!isDemoWallet && canWriteContracts) {
-            txHash = await createPolicyOnchain(pendingPolicy);
+            const result = await createPolicyOnchain(pendingPolicy);
+            txHash = result.hash;
+            onchainPolicyId = result.policyId;
           }
 
-          return { activatedPolicy: await activatePolicy(pendingPolicy), txHash };
+          const activatedPolicy = await activatePolicy(pendingPolicy);
+          return {
+            activatedPolicy: {
+              ...activatedPolicy,
+              id: onchainPolicyId ?? activatedPolicy.id,
+              ownerAddress: account.address,
+              contractAddress: txHash ? contractAddresses.policyVault : activatedPolicy.contractAddress,
+            },
+            txHash,
+          };
         })
         .then(({ activatedPolicy, txHash }) => {
           setPolicy(activatedPolicy);
@@ -273,7 +355,7 @@ export function RailApp() {
               policyId: activatedPolicy.id,
               title: txHash ? "Policy created onchain" : "Policy activated in demo mode",
               attempted: "Create PolicyVault policy",
-              reason: txHash ? "Wallet submitted PolicyVault.createPolicy." : "No contract addresses were configured, so Rail used demo activation.",
+              reason: txHash ? "Wallet confirmed PolicyVault.createPolicy and Rail captured the onchain policy ID." : "No contract addresses were configured, so Rail used demo activation.",
               rule: "User signature required",
               fundsMoved: "0 USDC",
               actionType: "policy-update",
@@ -282,10 +364,10 @@ export function RailApp() {
                 chainId: activatedPolicy.chainId,
                 contractAddress: activatedPolicy.contractAddress,
                 hash: txHash,
-                status: txHash ? "pending" : "not-submitted",
+                status: txHash ? "confirmed" : "not-submitted",
               },
             }),
-            ...simulateAgentActivity(),
+            ...(txHash ? [] : simulateAgentActivity()),
           ]);
           moveToApp("dashboard");
         })
@@ -336,23 +418,65 @@ export function RailApp() {
               onConnect={handleConnectWallet}
               onConnectWrongNetwork={handleConnectWrongNetwork}
               onDeposit={(amount) => {
-                setAccount((current) => ({ ...current, vaultBalanceUSDC: current.vaultBalanceUSDC + amount }));
-                pushActivity(
-                  createLocalActivity({
-                    kind: "executed",
-                    title: `Deposited ${amount} USDC`,
-                    attempted: "Deposit funds into PolicyVault",
-                    reason: "Vault balance updated in demo mode.",
-                    rule: "User-confirmed deposit",
-                    fundsMoved: `${amount} USDC`,
-                    actionType: "deposit",
-                  }),
-                );
+                void (async () => {
+                  if (!isDemoWallet && canWriteContracts) {
+                    const result = await depositUSDC(amount);
+                    setAccount((current) => ({ ...current, vaultBalanceUSDC: current.vaultBalanceUSDC + amount }));
+                    pushActivity(
+                      createLocalActivity({
+                        kind: "executed",
+                        policyId: activePolicy.id,
+                        title: `Deposited ${amount} rUSDC onchain`,
+                        attempted: "Mint demo rUSDC, approve PolicyVault, deposit funds",
+                        reason: "Wallet confirmed the test token mint, allowance approval, and PolicyVault deposit.",
+                        rule: "User-confirmed deposit",
+                        fundsMoved: `${amount} USDC`,
+                        actionType: "deposit",
+                        txHash: result.depositHash,
+                        transaction: {
+                          chainId: activePolicy.chainId,
+                          contractAddress: contractAddresses.policyVault,
+                          hash: result.depositHash,
+                          status: "confirmed",
+                        },
+                      }),
+                    );
+                    return;
+                  }
+
+                  setAccount((current) => ({ ...current, vaultBalanceUSDC: current.vaultBalanceUSDC + amount }));
+                  pushActivity(
+                    createLocalActivity({
+                      kind: "executed",
+                      title: `Deposited ${amount} USDC`,
+                      attempted: "Deposit funds into PolicyVault",
+                      reason: "Vault balance updated in demo mode.",
+                      rule: "User-confirmed deposit",
+                      fundsMoved: `${amount} USDC`,
+                      actionType: "deposit",
+                    }),
+                  );
+                })().catch((error) => {
+                  pushActivity(
+                    createLocalActivity({
+                      kind: "failed",
+                      policyId: activePolicy.id,
+                      title: "Deposit failed",
+                      attempted: "Deposit funds into PolicyVault",
+                      reason: error instanceof Error ? error.message : "Deposit transaction failed.",
+                      rule: "Token approval and vault deposit",
+                      fundsMoved: "0 USDC",
+                      actionType: "deposit",
+                      simulationResult: "failed",
+                      transaction: { chainId: activePolicy.chainId, contractAddress: contractAddresses.policyVault, status: "failed" },
+                    }),
+                  );
+                });
               }}
               onGeneratePolicy={handleGeneratePolicy}
               onGoalChange={setGoal}
               onLaunch={() => moveToApp("connect")}
-              onPause={() => updatePolicyStatus("paused", "Automation paused", "Agent execution is stopped until the user resumes.")}
+              onPause={() => handlePolicyStatusChange("paused", "Automation paused", "Agent execution is stopped until the user resumes.")}
               onReset={() => {
                 railWallet.disconnect();
                 setIsDemoWallet(true);
@@ -362,26 +486,69 @@ export function RailApp() {
                 setGoal(defaultGoal);
                 moveToApp("connect");
               }}
-              onResume={() => updatePolicyStatus("active", "Automation resumed", "Agent execution can continue inside the approved policy.")}
-              onRevoke={() => updatePolicyStatus("revoked", "Policy revoked", "Future agent actions are disabled for this policy.")}
+              onResume={() => handlePolicyStatusChange("active", "Automation resumed", "Agent execution can continue inside the approved policy.")}
+              onRevoke={() => handlePolicyStatusChange("revoked", "Policy revoked", "Future agent actions are disabled for this policy.")}
               onRunAgentDemo={handleRunAgentDemo}
               onSign={handleSignPolicy}
               onSwitchNetwork={handleSwitchNetwork}
               onUpdatePolicy={setPolicy}
               onWithdraw={(amount) => {
-                setAccount((current) => ({ ...current, vaultBalanceUSDC: Math.max(0, current.vaultBalanceUSDC - amount) }));
-                pushActivity(
-                  createLocalActivity({
-                    kind: "executed",
-                    title: `Withdrew ${amount} USDC`,
-                    attempted: "Withdraw funds from PolicyVault",
-                    reason: "User withdrawal completed in demo mode.",
-                    rule: "Owner-only withdrawal",
-                    fundsMoved: `${amount} USDC`,
-                    actionType: "withdraw",
-                  }),
-                );
+                void (async () => {
+                  if (!isDemoWallet && canWriteContracts) {
+                    const txHash = await withdrawUSDC(amount);
+                    setAccount((current) => ({ ...current, vaultBalanceUSDC: Math.max(0, current.vaultBalanceUSDC - amount) }));
+                    pushActivity(
+                      createLocalActivity({
+                        kind: "executed",
+                        policyId: activePolicy.id,
+                        title: `Withdrew ${amount} USDC onchain`,
+                        attempted: "Withdraw funds from PolicyVault",
+                        reason: "Wallet confirmed owner-only vault withdrawal.",
+                        rule: "Owner-only withdrawal",
+                        fundsMoved: `${amount} USDC`,
+                        actionType: "withdraw",
+                        txHash,
+                        transaction: {
+                          chainId: activePolicy.chainId,
+                          contractAddress: contractAddresses.policyVault,
+                          hash: txHash,
+                          status: "confirmed",
+                        },
+                      }),
+                    );
+                    return;
+                  }
+
+                  setAccount((current) => ({ ...current, vaultBalanceUSDC: Math.max(0, current.vaultBalanceUSDC - amount) }));
+                  pushActivity(
+                    createLocalActivity({
+                      kind: "executed",
+                      title: `Withdrew ${amount} USDC`,
+                      attempted: "Withdraw funds from PolicyVault",
+                      reason: "User withdrawal completed in demo mode.",
+                      rule: "Owner-only withdrawal",
+                      fundsMoved: `${amount} USDC`,
+                      actionType: "withdraw",
+                    }),
+                  );
+                })().catch((error) => {
+                  pushActivity(
+                    createLocalActivity({
+                      kind: "failed",
+                      policyId: activePolicy.id,
+                      title: "Withdrawal failed",
+                      attempted: "Withdraw funds from PolicyVault",
+                      reason: error instanceof Error ? error.message : "Withdrawal transaction failed.",
+                      rule: "Owner-only withdrawal",
+                      fundsMoved: "0 USDC",
+                      actionType: "withdraw",
+                      simulationResult: "failed",
+                      transaction: { chainId: activePolicy.chainId, contractAddress: contractAddresses.policyVault, status: "failed" },
+                    }),
+                  );
+                });
               }}
+              isLiveMode={!isDemoWallet && canWriteContracts}
               policy={activePolicy}
               stage={stage}
             />

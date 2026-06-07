@@ -62,7 +62,7 @@ export async function simulateAgentAction(policy: PolicyDraft, account: UserAcco
 }
 
 export async function executeAgentAction(policy: PolicyDraft, account: UserAccount, overrides?: Partial<{ amountUSDC: number; slippageBps: number; projectedReserveUSDC: number }>) {
-  return postJson<{ ok: boolean; status: "executed" | "blocked"; activity: ActivityEvent; txHash?: string }>("/api/agent/execute", {
+  return postJson<{ ok: boolean; status: "executed" | "blocked" | "failed"; activity: ActivityEvent; txHash?: string }>("/api/agent/execute", {
     walletAddress: account.address,
     policy,
     action: {
