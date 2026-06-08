@@ -45,9 +45,9 @@ contract PolicyVaultTest is Test {
         vm.prank(agent);
         uint256 amountOut = executor.execute(policyId, address(router), 20e6, 100, 480e6, "");
 
-        assertEq(amountOut, 20e6);
+        assertEq(amountOut, 20e18);
         assertEq(vault.vaultBalanceOf(user, address(usdc)), 480e6);
-        assertEq(vault.vaultBalanceOf(user, address(weth)), 20e6);
+        assertEq(vault.vaultBalanceOf(user, address(weth)), 20e18);
     }
 
     function testBlocksOverspend() public {

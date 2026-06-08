@@ -23,7 +23,7 @@ export const policySchema = z.object({
   intervalValue: z.number().int().positive().default(1),
   intervalUnit: z.enum(intervalUnits).default("weeks"),
   monthlyCapUSDC: z.number().positive(),
-  slippageBps: z.number().int().min(1).max(500),
+  slippageBps: z.number().int().min(1).max(10_000),
   minimumReserveUSDC: z.number().min(0),
   expiryDays: z.number().int().min(1).max(365),
   agentPermission: z.enum(["Execute only", "Simulation only"]),

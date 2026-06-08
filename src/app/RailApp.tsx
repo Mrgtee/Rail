@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useRef, useState } from "react";
 import { Header, Hero, LandingStory } from "../components/landing/LandingPage";
 import { ProductWorkspace } from "../components/workspace/Workspace";
 import {
@@ -6,33 +6,46 @@ import {
   activationSteps,
   createLocalActivity,
   defaultGoal,
-  demoAccount,
   disconnectedAccount,
   draftingSteps,
   samplePolicy,
   signPolicy,
-  simulateAgentActivity,
-  wrongNetworkAccount,
 } from "../domain/mockRail";
 import { assetTicker } from "../domain/assets";
 import type { ActivityEvent, AppStage, PolicyDraft, UserAccount } from "../domain/types";
+
 import { contractAddresses } from "../contracts/addresses";
 import { useRailContracts } from "../contracts/useRailContracts";
 import { draftPolicyFromAgent, executeAgentAction, fetchRailHealth, type AgentDemoScenario, type RailHealth } from "../services/railApi";
 import { useRailWallet } from "../wallet/useRailWallet";
+
+const intervalMsByUnit = {
+  seconds: 1_000,
+  minutes: 60_000,
+  hours: 3_600_000,
+  days: 86_400_000,
+  weeks: 604_800_000,
+  years: 31_536_000_000,
+} as const;
+
+function policyIntervalMs(policy: Pick<PolicyDraft, "intervalValue" | "intervalUnit">) {
+  return Math.max(1_000, policy.intervalValue * intervalMsByUnit[policy.intervalUnit]);
+}
 
 export function RailApp() {
   const appRef = useRef<HTMLDivElement>(null);
   const railWallet = useRailWallet();
   const [stage, setStage] = useState<AppStage>("landing");
   const [account, setAccount] = useState<UserAccount>(disconnectedAccount);
-  const [isDemoWallet, setIsDemoWallet] = useState(true);
   const [goal, setGoal] = useState(defaultGoal);
   const [policy, setPolicy] = useState<PolicyDraft | null>(null);
   const [draftingStep, setDraftingStep] = useState(0);
   const [activationStep, setActivationStep] = useState(0);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [health, setHealth] = useState<RailHealth | null>(null);
+  const [isAutomationRunning, setIsAutomationRunning] = useState(false);
+  const automationAmountRef = useRef<number | undefined>(undefined);
+  const automationInFlightRef = useRef(false);
 
   const {
     canWriteContracts,
@@ -58,53 +71,36 @@ export function RailApp() {
     }, 60);
   };
 
-  const pushActivity = (event: ActivityEvent) => {
+  const pushActivity = useCallback((event: ActivityEvent) => {
     setActivity((current) => [event, ...current]);
-  };
+  }, []);
 
   const handleConnectWallet = () => {
     setAccount({ ...disconnectedAccount, status: "connecting" });
 
-    void railWallet
-      .connect()
-      .then(() => {
-        setIsDemoWallet(false);
-      })
-      .catch(() => {
-        setIsDemoWallet(true);
-        window.setTimeout(() => {
-          setAccount(demoAccount);
-          moveToApp("goal");
-        }, 450);
+    void railWallet.connect().catch((error) => {
+      setAccount({
+        ...disconnectedAccount,
+        error: error instanceof Error ? error.message : "Wallet connection failed. Install or unlock a browser wallet to use Rail.",
       });
-  };
-
-  const handleConnectWrongNetwork = () => {
-    setIsDemoWallet(true);
-    setAccount(wrongNetworkAccount);
+    });
   };
 
   const handleSwitchNetwork = () => {
     setAccount((current) => ({ ...current, status: "connecting" }));
 
-    if (!isDemoWallet) {
-      void railWallet
-        .switchToPrimaryChain()
-        .then(() => {
-          moveToApp("goal");
-        })
-        .catch(() => {
-          setIsDemoWallet(true);
-          setAccount(demoAccount);
-          moveToApp("goal");
-        });
-      return;
-    }
-
-    window.setTimeout(() => {
-      setAccount(demoAccount);
-      moveToApp("goal");
-    }, 500);
+    void railWallet
+      .switchToPrimaryChain()
+      .then(() => {
+        moveToApp("goal");
+      })
+      .catch((error) => {
+        setAccount((current) => ({
+          ...current,
+          status: "wrong-network",
+          error: error instanceof Error ? error.message : "Switch to Robinhood Chain Testnet to continue.",
+        }));
+      });
   };
 
   const handleGeneratePolicy = () => {
@@ -139,21 +135,41 @@ export function RailApp() {
   const inputVaultBalance = (targetPolicy: PolicyDraft, targetAccount: UserAccount) =>
     targetPolicy.inputAsset === "ETH" ? targetAccount.vaultBalanceWETH : targetAccount.vaultBalanceUSDC;
 
-  const handleRunAgentDemo = (scenario: AgentDemoScenario, requestedAmount?: number) => {
+  const runRailAction = useCallback((scenario: AgentDemoScenario, requestedAmount?: number) => {
     const amount = requestedAmount && requestedAmount > 0 ? requestedAmount : activePolicy.spendPerExecutionUSDC;
     const baseProjectedReserve = Math.max(0, inputVaultBalance(activePolicy, account) - amount);
     const overrides =
       scenario === "blocked-slippage"
         ? { amountUSDC: amount, slippageBps: activePolicy.slippageBps + 75, projectedReserveUSDC: baseProjectedReserve }
-        : scenario === "blocked-overspend"
-          ? { amountUSDC: activePolicy.spendPerExecutionUSDC + 15, projectedReserveUSDC: Math.max(0, inputVaultBalance(activePolicy, account) - activePolicy.spendPerExecutionUSDC - 15) }
-          : {
-              amountUSDC: amount,
-              slippageBps: Math.max(1, activePolicy.slippageBps - 25),
-              projectedReserveUSDC: baseProjectedReserve,
-            };
+        : {
+            amountUSDC: amount,
+            slippageBps: Math.max(1, activePolicy.slippageBps - 25),
+            projectedReserveUSDC: baseProjectedReserve,
+          };
 
-    void executeAgentAction(activePolicy, account, overrides)
+    if (!account.address || !canWriteContracts) {
+      pushActivity(
+        createLocalActivity({
+          kind: "failed",
+          policyId: activePolicy.id,
+          title: "Wallet required",
+          attempted: "dca-swap: " + overrides.amountUSDC + " " + assetTicker(activePolicy.inputAsset) + " -> " + assetTicker(activePolicy.outputAsset),
+          reason: "Connect your wallet on Robinhood Chain Testnet before running Rail automation.",
+          rule: "Connected wallet",
+          fundsMoved: "0 " + assetTicker(activePolicy.inputAsset),
+          actionType: "dca-swap",
+          simulationResult: "failed",
+          transaction: {
+            chainId: activePolicy.chainId,
+            contractAddress: activePolicy.contractAddress,
+            status: "not-submitted",
+          },
+        }),
+      );
+      return Promise.resolve();
+    }
+
+    return executeAgentAction(activePolicy, account, overrides)
       .then((result) => {
         pushActivity(result.activity);
         if (result.status === "executed") {
@@ -169,62 +185,83 @@ export function RailApp() {
                 ? Math.max(0, current.vaultBalanceWETH - executedAmount)
                 : current.vaultBalanceWETH + (activePolicy.outputAsset === "ETH" ? executedAmount : 0),
           }));
-          if (!isDemoWallet && canWriteContracts) {
-            void refreshBalances();
-          }
+          void refreshBalances();
         }
       })
       .catch((error) => {
-        if (!isDemoWallet && canWriteContracts) {
-          pushActivity(
-            createLocalActivity({
-              kind: "failed",
-              policyId: activePolicy.id,
-              title: "Agent execution failed",
-              attempted: `dca-swap: ${overrides.amountUSDC ?? activePolicy.spendPerExecutionUSDC} ${activePolicy.inputAsset} -> ${activePolicy.outputAsset}`,
-              reason: error instanceof Error ? error.message : "Backend could not submit the onchain agent action.",
-              rule: "AgentExecutor transaction",
-              fundsMoved: `0 ${assetTicker(activePolicy.inputAsset)}`,
-              actionType: "dca-swap",
-              simulationResult: "failed",
-              transaction: {
-                chainId: activePolicy.chainId,
-                contractAddress: activePolicy.contractAddress,
-                status: "failed",
-              },
-            }),
-          );
-          return;
-        }
-
-        const isBlocked = scenario !== "valid";
-        const amount = overrides.amountUSDC ?? activePolicy.spendPerExecutionUSDC;
         pushActivity(
           createLocalActivity({
-            kind: isBlocked ? "blocked" : "executed",
+            kind: "failed",
             policyId: activePolicy.id,
-            title: isBlocked ? (scenario === "blocked-slippage" ? "Blocked: slippage above policy" : "Blocked: spend above policy") : "Executed demo action",
-            attempted: `dca-swap: ${amount} ${activePolicy.inputAsset} -> ${activePolicy.outputAsset}`,
-            reason: isBlocked
-              ? scenario === "blocked-slippage"
-                ? "Route exceeds signed slippage limit."
-                : "Action exceeds spend per execution."
-              : "Action matched the active policy.",
-            rule: isBlocked ? (scenario === "blocked-slippage" ? "Max slippage" : "Max spend per execution") : "PolicyVault checks",
-            fundsMoved: isBlocked ? `0 ${assetTicker(activePolicy.inputAsset)}` : `${amount} ${assetTicker(activePolicy.inputAsset)}`,
+            title: "Agent execution failed",
+            attempted: "dca-swap: " + (overrides.amountUSDC ?? activePolicy.spendPerExecutionUSDC) + " " + activePolicy.inputAsset + " -> " + activePolicy.outputAsset,
+            reason: error instanceof Error ? error.message : "Backend could not submit the onchain agent action.",
+            rule: "AgentExecutor transaction",
+            fundsMoved: "0 " + assetTicker(activePolicy.inputAsset),
             actionType: "dca-swap",
-            simulationResult: isBlocked ? "blocked" : "passed",
+            simulationResult: "failed",
             transaction: {
               chainId: activePolicy.chainId,
               contractAddress: activePolicy.contractAddress,
-              status: isBlocked ? "not-submitted" : "confirmed",
-              hash: isBlocked ? undefined : "0xlocaldemoexecution",
+              status: "failed",
             },
-            txHash: isBlocked ? undefined : "0xlocaldemoexecution",
           }),
         );
       });
+  }, [account, activePolicy, canWriteContracts, pushActivity, refreshBalances]);
+
+  const handleRunAgentDemo = (scenario: AgentDemoScenario, requestedAmount?: number) => {
+    void runRailAction(scenario, requestedAmount);
   };
+
+  const runAutomationTick = useCallback((amount?: number) => {
+    if (automationInFlightRef.current) {
+      return;
+    }
+
+    automationInFlightRef.current = true;
+    void runRailAction("valid", amount).finally(() => {
+      automationInFlightRef.current = false;
+    });
+  }, [runRailAction]);
+
+  const handleToggleAutomation = (amount?: number) => {
+    if (isAutomationRunning) {
+      setIsAutomationRunning(false);
+      pushActivity(
+        createLocalActivity({
+          kind: "review-needed",
+          policyId: activePolicy.id,
+          title: "Rail automation stopped",
+          attempted: "Stop scheduled agent loop",
+          reason: "The local demo operator stopped automatic scheduled executions. The onchain policy remains active until paused or revoked.",
+          rule: "User operator control",
+          fundsMoved: "0 " + assetTicker(activePolicy.inputAsset),
+          actionType: "policy-update",
+          transaction: { chainId: activePolicy.chainId, contractAddress: activePolicy.contractAddress, status: "not-submitted" },
+        }),
+      );
+      return;
+    }
+
+    automationAmountRef.current = amount && amount > 0 ? amount : activePolicy.spendPerExecutionUSDC;
+    setIsAutomationRunning(true);
+    pushActivity(
+      createLocalActivity({
+        kind: "review-needed",
+        policyId: activePolicy.id,
+        title: "Rail automation started",
+        attempted: "Run " + assetTicker(activePolicy.inputAsset) + " -> " + assetTicker(activePolicy.outputAsset) + " every " + activePolicy.intervalValue + " " + activePolicy.intervalUnit,
+        reason: "Rail will submit scheduled agent actions until the operator stops it or the policy blocks execution.",
+        rule: "Signed cadence",
+        fundsMoved: "0 " + assetTicker(activePolicy.inputAsset),
+        actionType: "policy-update",
+        transaction: { chainId: activePolicy.chainId, contractAddress: activePolicy.contractAddress, status: "not-submitted" },
+      }),
+    );
+    runAutomationTick(automationAmountRef.current);
+  };
+
 
   const updatePolicyStatus = (status: PolicyDraft["status"], title: string, reason: string, txHash?: string) => {
     const updatedPolicy = { ...activePolicy, status, updatedAt: new Date().toISOString() };
@@ -253,7 +290,7 @@ export function RailApp() {
   const handlePolicyStatusChange = (status: Extract<PolicyDraft["status"], "active" | "paused" | "revoked">, title: string, reason: string) => {
     void (async () => {
       let txHash: string | undefined;
-      if (!isDemoWallet && canWriteContracts) {
+      if (canWriteContracts) {
         if (status === "paused") txHash = await pausePolicyOnchain(activePolicy);
         if (status === "active") txHash = await resumePolicyOnchain(activePolicy);
         if (status === "revoked") txHash = await revokePolicyOnchain(activePolicy);
@@ -295,20 +332,16 @@ export function RailApp() {
   }, [vaultBalanceUSDC, vaultBalanceWETH]);
 
   useEffect(() => {
-    if (isDemoWallet) {
-      return;
-    }
-
     setAccount((current) => ({
       ...railWallet.account,
-      vaultBalanceUSDC: current.vaultBalanceUSDC || demoAccount.vaultBalanceUSDC,
-      vaultBalanceWETH: current.vaultBalanceWETH || demoAccount.vaultBalanceWETH,
+      vaultBalanceUSDC: current.vaultBalanceUSDC,
+      vaultBalanceWETH: current.vaultBalanceWETH,
     }));
 
     if (railWallet.account.status === "connected" && stage === "connect") {
       moveToApp("goal");
     }
-  }, [isDemoWallet, railWallet.account.address, railWallet.account.chainId, railWallet.account.status, stage]);
+  }, [railWallet.account.address, railWallet.account.chainId, railWallet.account.error, railWallet.account.status, stage]);
 
   useEffect(() => {
     if (stage !== "drafting") {
@@ -351,24 +384,20 @@ export function RailApp() {
     const finishTimer = window.setTimeout(() => {
       void signPolicy(activePolicy)
         .then(async (pendingPolicy) => {
-          let txHash: string | undefined;
-          let onchainPolicyId: string | undefined;
-
-          if (!isDemoWallet && canWriteContracts) {
-            const result = await createPolicyOnchain(pendingPolicy);
-            txHash = result.hash;
-            onchainPolicyId = result.policyId;
+          if (!account.address || !canWriteContracts) {
+            throw new Error("Connect your wallet on Robinhood Chain Testnet before signing a Rail policy.");
           }
 
+          const result = await createPolicyOnchain(pendingPolicy);
           const activatedPolicy = await activatePolicy(pendingPolicy);
           return {
             activatedPolicy: {
               ...activatedPolicy,
-              id: onchainPolicyId ?? activatedPolicy.id,
+              id: result.policyId ?? pendingPolicy.id,
               ownerAddress: account.address,
-              contractAddress: txHash ? contractAddresses.policyVault : activatedPolicy.contractAddress,
+              contractAddress: contractAddresses.policyVault,
             },
-            txHash,
+            txHash: result.hash,
           };
         })
         .then(({ activatedPolicy, txHash }) => {
@@ -377,9 +406,9 @@ export function RailApp() {
             createLocalActivity({
               kind: "executed",
               policyId: activatedPolicy.id,
-              title: txHash ? "Policy created onchain" : "Policy activated in demo mode",
+              title: "Policy created onchain",
               attempted: "Create PolicyVault policy",
-              reason: txHash ? "Wallet confirmed PolicyVault.createPolicy and Rail captured the onchain policy ID." : "No contract addresses were configured, so Rail used demo activation.",
+              reason: "Wallet confirmed PolicyVault.createPolicy and Rail captured the onchain policy ID.",
               rule: "User signature required",
               fundsMoved: "0 USDC",
               actionType: "policy-update",
@@ -388,10 +417,9 @@ export function RailApp() {
                 chainId: activatedPolicy.chainId,
                 contractAddress: activatedPolicy.contractAddress,
                 hash: txHash,
-                status: txHash ? "confirmed" : "not-submitted",
+                status: "confirmed",
               },
             }),
-            ...(txHash ? [] : simulateAgentActivity()),
           ]);
           moveToApp("dashboard");
         })
@@ -417,7 +445,126 @@ export function RailApp() {
       timers.forEach(window.clearTimeout);
       window.clearTimeout(finishTimer);
     };
-  }, [activePolicy, canWriteContracts, createPolicyOnchain, isDemoWallet, stage]);
+  }, [account.address, activePolicy, canWriteContracts, createPolicyOnchain, stage]);
+
+  useEffect(() => {
+    if (!isAutomationRunning || activePolicy.status !== "active") {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      runAutomationTick(automationAmountRef.current);
+    }, policyIntervalMs(activePolicy));
+
+    return () => window.clearInterval(timer);
+  }, [activePolicy, isAutomationRunning, runAutomationTick]);
+
+  useEffect(() => {
+    if (activePolicy.status !== "active" && isAutomationRunning) {
+      setIsAutomationRunning(false);
+    }
+  }, [activePolicy.status, isAutomationRunning]);
+
+  const handleDeposit = (amount: number, asset: string) => {
+    void (async () => {
+      if (!account.address || !canWriteContracts) {
+        throw new Error("Connect your wallet on Robinhood Chain Testnet before depositing.");
+      }
+
+      const result = await depositAsset(asset, amount);
+      setAccount((current) => ({
+        ...current,
+        vaultBalanceUSDC: asset === "USDC" ? current.vaultBalanceUSDC + amount : current.vaultBalanceUSDC,
+        vaultBalanceWETH: asset === "ETH" ? current.vaultBalanceWETH + amount : current.vaultBalanceWETH,
+      }));
+      pushActivity(
+        createLocalActivity({
+          kind: "executed",
+          policyId: activePolicy.id,
+          title: "Deposited " + amount + " " + assetTicker(asset) + " onchain",
+          attempted: "Mint demo " + assetTicker(asset) + ", approve PolicyVault, deposit funds",
+          reason: "Wallet confirmed the test token mint, allowance approval, and PolicyVault deposit.",
+          rule: "User-confirmed deposit",
+          fundsMoved: amount + " " + assetTicker(asset),
+          actionType: "deposit",
+          txHash: result.depositHash,
+          transaction: {
+            chainId: activePolicy.chainId,
+            contractAddress: contractAddresses.policyVault,
+            hash: result.depositHash,
+            status: "confirmed",
+          },
+        }),
+      );
+      void refreshBalances();
+    })().catch((error) => {
+      pushActivity(
+        createLocalActivity({
+          kind: "failed",
+          policyId: activePolicy.id,
+          title: "Deposit failed",
+          attempted: "Deposit funds into PolicyVault",
+          reason: error instanceof Error ? error.message : "Deposit transaction failed.",
+          rule: "Token approval and vault deposit",
+          fundsMoved: "0 " + assetTicker(asset),
+          actionType: "deposit",
+          simulationResult: "failed",
+          transaction: { chainId: activePolicy.chainId, contractAddress: contractAddresses.policyVault, status: "failed" },
+        }),
+      );
+    });
+  };
+
+  const handleWithdraw = (amount: number, asset: string) => {
+    void (async () => {
+      if (!account.address || !canWriteContracts) {
+        throw new Error("Connect your wallet on Robinhood Chain Testnet before withdrawing.");
+      }
+
+      const txHash = await withdrawAsset(asset, amount);
+      setAccount((current) => ({
+        ...current,
+        vaultBalanceUSDC: asset === "USDC" ? Math.max(0, current.vaultBalanceUSDC - amount) : current.vaultBalanceUSDC,
+        vaultBalanceWETH: asset === "ETH" ? Math.max(0, current.vaultBalanceWETH - amount) : current.vaultBalanceWETH,
+      }));
+      pushActivity(
+        createLocalActivity({
+          kind: "executed",
+          policyId: activePolicy.id,
+          title: "Withdrew " + amount + " " + assetTicker(asset) + " onchain",
+          attempted: "Withdraw funds from PolicyVault",
+          reason: "Wallet confirmed owner-only vault withdrawal.",
+          rule: "Owner-only withdrawal",
+          fundsMoved: amount + " " + assetTicker(asset),
+          actionType: "withdraw",
+          txHash,
+          transaction: {
+            chainId: activePolicy.chainId,
+            contractAddress: contractAddresses.policyVault,
+            hash: txHash,
+            status: "confirmed",
+          },
+        }),
+      );
+      void refreshBalances();
+    })().catch((error) => {
+      pushActivity(
+        createLocalActivity({
+          kind: "failed",
+          policyId: activePolicy.id,
+          title: "Withdrawal failed",
+          attempted: "Withdraw funds from PolicyVault",
+          reason: error instanceof Error ? error.message : "Withdrawal transaction failed.",
+          rule: "Owner-only withdrawal",
+          fundsMoved: "0 " + assetTicker(asset),
+          actionType: "withdraw",
+          simulationResult: "failed",
+          transaction: { chainId: activePolicy.chainId, contractAddress: contractAddresses.policyVault, status: "failed" },
+        }),
+      );
+    });
+  };
+
 
   return (
     <div className="min-h-screen overflow-hidden bg-rail-black text-rail-text">
@@ -440,78 +587,14 @@ export function RailApp() {
               health={health}
               onCheckHealth={handleCheckHealth}
               onConnect={handleConnectWallet}
-              onConnectWrongNetwork={handleConnectWrongNetwork}
-              onDeposit={(amount, asset) => {
-                void (async () => {
-                  if (!isDemoWallet && canWriteContracts) {
-                    const result = await depositAsset(asset, amount);
-                    setAccount((current) => ({
-                      ...current,
-                      vaultBalanceUSDC: asset === "USDC" ? current.vaultBalanceUSDC + amount : current.vaultBalanceUSDC,
-                      vaultBalanceWETH: asset === "ETH" ? current.vaultBalanceWETH + amount : current.vaultBalanceWETH,
-                    }));
-                    pushActivity(
-                      createLocalActivity({
-                        kind: "executed",
-                        policyId: activePolicy.id,
-                        title: `Deposited ${amount} ${assetTicker(asset)} onchain`,
-                        attempted: `Mint demo ${assetTicker(asset)}, approve PolicyVault, deposit funds`,
-                        reason: "Wallet confirmed the test token mint, allowance approval, and PolicyVault deposit.",
-                        rule: "User-confirmed deposit",
-                        fundsMoved: `${amount} ${assetTicker(asset)}`,
-                        actionType: "deposit",
-                        txHash: result.depositHash,
-                        transaction: {
-                          chainId: activePolicy.chainId,
-                          contractAddress: contractAddresses.policyVault,
-                          hash: result.depositHash,
-                          status: "confirmed",
-                        },
-                      }),
-                    );
-                    return;
-                  }
-
-                  setAccount((current) => ({
-                    ...current,
-                    vaultBalanceUSDC: asset === "USDC" ? current.vaultBalanceUSDC + amount : current.vaultBalanceUSDC,
-                    vaultBalanceWETH: asset === "ETH" ? current.vaultBalanceWETH + amount : current.vaultBalanceWETH,
-                  }));
-                  pushActivity(
-                    createLocalActivity({
-                      kind: "executed",
-                      title: `Deposited ${amount} ${assetTicker(asset)}`,
-                      attempted: "Deposit funds into PolicyVault",
-                      reason: "Vault balance updated in demo mode.",
-                      rule: "User-confirmed deposit",
-                      fundsMoved: `${amount} ${assetTicker(asset)}`,
-                      actionType: "deposit",
-                    }),
-                  );
-                })().catch((error) => {
-                  pushActivity(
-                    createLocalActivity({
-                      kind: "failed",
-                      policyId: activePolicy.id,
-                      title: "Deposit failed",
-                      attempted: "Deposit funds into PolicyVault",
-                      reason: error instanceof Error ? error.message : "Deposit transaction failed.",
-                      rule: "Token approval and vault deposit",
-                      fundsMoved: `0 ${assetTicker(asset)}`,
-                      actionType: "deposit",
-                      simulationResult: "failed",
-                      transaction: { chainId: activePolicy.chainId, contractAddress: contractAddresses.policyVault, status: "failed" },
-                    }),
-                  );
-                });
-              }}
+              onDeposit={handleDeposit}
               onGeneratePolicy={handleGeneratePolicy}
               onGoalChange={setGoal}
               onLaunch={() => moveToApp("connect")}
               onPause={() => handlePolicyStatusChange("paused", "Automation paused", "Agent execution is stopped until the user resumes.")}
               onReset={() => {
                 railWallet.disconnect();
-                setIsDemoWallet(true);
+                setIsAutomationRunning(false);
                 setAccount(disconnectedAccount);
                 setPolicy(null);
                 setActivity([]);
@@ -524,71 +607,10 @@ export function RailApp() {
               onSign={handleSignPolicy}
               onSwitchNetwork={handleSwitchNetwork}
               onUpdatePolicy={setPolicy}
-              onWithdraw={(amount, asset) => {
-                void (async () => {
-                  if (!isDemoWallet && canWriteContracts) {
-                    const txHash = await withdrawAsset(asset, amount);
-                    setAccount((current) => ({
-                      ...current,
-                      vaultBalanceUSDC: asset === "USDC" ? Math.max(0, current.vaultBalanceUSDC - amount) : current.vaultBalanceUSDC,
-                      vaultBalanceWETH: asset === "ETH" ? Math.max(0, current.vaultBalanceWETH - amount) : current.vaultBalanceWETH,
-                    }));
-                    pushActivity(
-                      createLocalActivity({
-                        kind: "executed",
-                        policyId: activePolicy.id,
-                        title: `Withdrew ${amount} ${assetTicker(asset)} onchain`,
-                        attempted: "Withdraw funds from PolicyVault",
-                        reason: "Wallet confirmed owner-only vault withdrawal.",
-                        rule: "Owner-only withdrawal",
-                        fundsMoved: `${amount} ${assetTicker(asset)}`,
-                        actionType: "withdraw",
-                        txHash,
-                        transaction: {
-                          chainId: activePolicy.chainId,
-                          contractAddress: contractAddresses.policyVault,
-                          hash: txHash,
-                          status: "confirmed",
-                        },
-                      }),
-                    );
-                    return;
-                  }
-
-                  setAccount((current) => ({
-                    ...current,
-                    vaultBalanceUSDC: asset === "USDC" ? Math.max(0, current.vaultBalanceUSDC - amount) : current.vaultBalanceUSDC,
-                    vaultBalanceWETH: asset === "ETH" ? Math.max(0, current.vaultBalanceWETH - amount) : current.vaultBalanceWETH,
-                  }));
-                  pushActivity(
-                    createLocalActivity({
-                      kind: "executed",
-                      title: `Withdrew ${amount} ${assetTicker(asset)}`,
-                      attempted: "Withdraw funds from PolicyVault",
-                      reason: "User withdrawal completed in demo mode.",
-                      rule: "Owner-only withdrawal",
-                      fundsMoved: `${amount} ${assetTicker(asset)}`,
-                      actionType: "withdraw",
-                    }),
-                  );
-                })().catch((error) => {
-                  pushActivity(
-                    createLocalActivity({
-                      kind: "failed",
-                      policyId: activePolicy.id,
-                      title: "Withdrawal failed",
-                      attempted: "Withdraw funds from PolicyVault",
-                      reason: error instanceof Error ? error.message : "Withdrawal transaction failed.",
-                      rule: "Owner-only withdrawal",
-                      fundsMoved: `0 ${assetTicker(asset)}`,
-                      actionType: "withdraw",
-                      simulationResult: "failed",
-                      transaction: { chainId: activePolicy.chainId, contractAddress: contractAddresses.policyVault, status: "failed" },
-                    }),
-                  );
-                });
-              }}
-              isLiveMode={!isDemoWallet && canWriteContracts}
+              onToggleAutomation={handleToggleAutomation}
+              onWithdraw={handleWithdraw}
+              isAutomationRunning={isAutomationRunning}
+              isLiveMode={canWriteContracts}
               policy={activePolicy}
               stage={stage}
             />

@@ -111,7 +111,7 @@ contract PolicyVault is Ownable, ReentrancyGuard {
         require(config.inputAsset != address(0) && config.outputAsset != address(0), "Rail: assets required");
         require(config.spendLimit > 0, "Rail: spend required");
         require(config.monthlyCap >= config.spendLimit, "Rail: cap below spend");
-        require(config.slippageBps <= 500, "Rail: slippage too high");
+        require(config.slippageBps <= 10_000, "Rail: slippage too high");
         require(config.cooldownSeconds > 0, "Rail: cooldown required");
         require(config.expiresAt > block.timestamp, "Rail: expiry required");
         require(config.agent != address(0), "Rail: agent required");

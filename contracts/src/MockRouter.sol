@@ -8,6 +8,10 @@ interface IMintableToken {
     function mint(address to, uint256 amount) external;
 }
 
+interface IERC20Decimals {
+    function decimals() external view returns (uint8);
+}
+
 contract MockRouter {
     using SafeERC20 for IERC20;
 
@@ -29,9 +33,24 @@ contract MockRouter {
         }
 
         IERC20(inputAsset).safeTransferFrom(msg.sender, address(this), amountIn);
-        amountOut = (amountIn * rate) / 10_000;
+        amountOut = (_normalizeDecimals(inputAsset, outputAsset, amountIn) * rate) / 10_000;
         IMintableToken(outputAsset).mint(msg.sender, amountOut);
 
         emit SwapExecuted(owner, inputAsset, outputAsset, amountIn, amountOut);
+    }
+
+    function _normalizeDecimals(address inputAsset, address outputAsset, uint256 amountIn) internal view returns (uint256) {
+        uint8 inputDecimals = IERC20Decimals(inputAsset).decimals();
+        uint8 outputDecimals = IERC20Decimals(outputAsset).decimals();
+
+        if (outputDecimals == inputDecimals) {
+            return amountIn;
+        }
+
+        if (outputDecimals > inputDecimals) {
+            return amountIn * (10 ** uint256(outputDecimals - inputDecimals));
+        }
+
+        return amountIn / (10 ** uint256(inputDecimals - outputDecimals));
     }
 }

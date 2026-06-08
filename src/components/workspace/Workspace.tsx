@@ -18,7 +18,7 @@ import { AnimatePresence } from "framer-motion";
 import { useMemo, useState } from "react";
 import { assetTicker, displayAsset, pairedSwapAsset, supportedSwapAssets } from "../../domain/assets";
 import { explorerAddressUrl, explorerTxUrl, primaryChain } from "../../domain/chains";
-import { activationSteps, draftingSteps, simulateAgentActivity } from "../../domain/mockRail";
+import { activationSteps, draftingSteps } from "../../domain/mockRail";
 import { formatAssetAmount, formatSlippage, intervalLabel, policyFields, policyRoute, shortAddress } from "../../domain/formatters";
 import type { ActivityEvent, AppStage, IntervalUnit, PolicyDraft, UserAccount } from "../../domain/types";
 import type { AgentDemoScenario, RailHealth } from "../../services/railApi";
@@ -45,7 +45,6 @@ interface ProductWorkspaceProps {
   onConnect: () => void;
   health: RailHealth | null;
   onCheckHealth: () => void;
-  onConnectWrongNetwork: () => void;
   onDeposit: (amount: number, asset: string) => void;
   onGeneratePolicy: () => void;
   onGoalChange: (goal: string) => void;
@@ -55,10 +54,12 @@ interface ProductWorkspaceProps {
   onResume: () => void;
   onRevoke: () => void;
   onRunAgentDemo: (scenario: AgentDemoScenario, amount?: number) => void;
+  onToggleAutomation: (amount?: number) => void;
   onSign: () => void;
   onSwitchNetwork: () => void;
   onUpdatePolicy: (policy: PolicyDraft) => void;
   onWithdraw: (amount: number, asset: string) => void;
+  isAutomationRunning: boolean;
   isLiveMode: boolean;
   policy: PolicyDraft;
   stage: AppStage;
@@ -73,7 +74,6 @@ export function ProductWorkspace({
   health,
   onCheckHealth,
   onConnect,
-  onConnectWrongNetwork,
   onDeposit,
   onGeneratePolicy,
   onGoalChange,
@@ -83,10 +83,12 @@ export function ProductWorkspace({
   onResume,
   onRevoke,
   onRunAgentDemo,
+  onToggleAutomation,
   onSign,
   onSwitchNetwork,
   onUpdatePolicy,
   onWithdraw,
+  isAutomationRunning,
   isLiveMode,
   policy,
   stage,
@@ -100,7 +102,7 @@ export function ProductWorkspace({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <StatusPill label={`${primaryChain.name} · ${primaryChain.id}`} tone="blue" />
-          <StatusPill label={isLiveMode ? "Onchain mode" : "Fallback mode"} tone={isLiveMode ? "green" : "amber"} />
+          <StatusPill label={isLiveMode ? "Onchain ready" : "Wallet required"} tone={isLiveMode ? "green" : "amber"} />
           {account.status === "connected" ? <StatusPill label={`Wallet ${shortAddress(account.address)}`} tone="green" /> : null}
           {account.status === "wrong-network" ? <StatusPill label="Wrong network" tone="red" /> : null}
         </div>
@@ -117,7 +119,6 @@ export function ProductWorkspace({
                 key="connect"
                 account={account}
                 onConnect={onConnect}
-                onConnectWrongNetwork={onConnectWrongNetwork}
                 onSwitchNetwork={onSwitchNetwork}
               />
             ) : null}
@@ -142,7 +143,9 @@ export function ProductWorkspace({
                 onResume={onResume}
                 onRevoke={onRevoke}
                 onRunAgentDemo={onRunAgentDemo}
+                onToggleAutomation={onToggleAutomation}
                 onWithdraw={onWithdraw}
+                isAutomationRunning={isAutomationRunning}
                 policy={policy}
               />
             ) : null}
@@ -175,11 +178,10 @@ function WelcomePanel({ onLaunch }: WelcomePanelProps) {
 interface ConnectScreenProps {
   account: UserAccount;
   onConnect: () => void;
-  onConnectWrongNetwork: () => void;
   onSwitchNetwork: () => void;
 }
 
-function ConnectScreen({ account, onConnect, onConnectWrongNetwork, onSwitchNetwork }: ConnectScreenProps) {
+function ConnectScreen({ account, onConnect, onSwitchNetwork }: ConnectScreenProps) {
   const isConnecting = account.status === "connecting";
   const isWrongNetwork = account.status === "wrong-network";
 
@@ -191,7 +193,7 @@ function ConnectScreen({ account, onConnect, onConnectWrongNetwork, onSwitchNetw
             <WalletCards size={24} />
           </div>
           <p className="mt-6 text-lg leading-8 text-rail-secondary">
-            Your funds stay controlled by smart contract rules. Rail tries an injected wallet first and falls back to a demo wallet when no browser wallet is available.
+Your funds stay controlled by smart contract rules. Rail requires your connected wallet on Robinhood Chain Testnet before policies, deposits, or swaps can run.
           </p>
           {account.address ? (
             <a className="mt-5 block font-mono text-sm text-rail-blue hover:text-rail-text" href={explorerAddressUrl(account.address, account.chainId)} rel="noreferrer" target="_blank">
@@ -216,7 +218,7 @@ function ConnectScreen({ account, onConnect, onConnectWrongNetwork, onSwitchNetw
             >
               {isConnecting ? "Connecting..." : "Connect Wallet"}
             </RailButton>
-          {isWrongNetwork ? (
+            {isWrongNetwork ? (
               <button
                 className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-5 text-sm font-semibold text-rail-text transition hover:border-rail-blue"
                 onClick={onSwitchNetwork}
@@ -225,15 +227,7 @@ function ConnectScreen({ account, onConnect, onConnectWrongNetwork, onSwitchNetw
                 <RefreshCcw size={17} />
                 Switch Network
               </button>
-            ) : (
-              <button
-                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-5 text-sm font-semibold text-rail-secondary transition hover:border-rail-red hover:text-rail-text"
-                onClick={onConnectWrongNetwork}
-                type="button"
-              >
-                Simulate Wrong Network
-              </button>
-            )}
+            ) : null}
           </div>
         </div>
         <WardenPanel state="monitoring" />
@@ -505,13 +499,15 @@ interface DashboardScreenProps {
   onResume: () => void;
   onRevoke: () => void;
   onRunAgentDemo: (scenario: AgentDemoScenario, amount?: number) => void;
+  onToggleAutomation: (amount?: number) => void;
   onWithdraw: (amount: number, asset: string) => void;
+  isAutomationRunning: boolean;
   policy: PolicyDraft;
 }
 
-function DashboardScreen({ account, activity, health, onCheckHealth, onDeposit, onPause, onReset, onResume, onRevoke, onRunAgentDemo, onWithdraw, policy }: DashboardScreenProps) {
+function DashboardScreen({ account, activity, health, onCheckHealth, onDeposit, onPause, onReset, onResume, onRevoke, onRunAgentDemo, onToggleAutomation, onWithdraw, isAutomationRunning, policy }: DashboardScreenProps) {
   const [selectedEvent, setSelectedEvent] = useState<ActivityEvent | null>(null);
-  const events = useMemo(() => (activity.length > 0 ? activity : simulateAgentActivity()), [activity]);
+  const events = useMemo(() => activity, [activity]);
   const isPaused = policy.status === "paused";
   const isRevoked = policy.status === "revoked";
   const inputBalance = policy.inputAsset === "ETH" ? account.vaultBalanceWETH : account.vaultBalanceUSDC;
@@ -587,7 +583,7 @@ function DashboardScreen({ account, activity, health, onCheckHealth, onDeposit, 
             </div>
           </div>
           <div className="grid gap-5">
-            <DemoOperatorPanel health={health} onCheckHealth={onCheckHealth} onRunAgentDemo={onRunAgentDemo} policy={policy} />
+            <DemoOperatorPanel health={health} isAutomationRunning={isAutomationRunning} onCheckHealth={onCheckHealth} onRunAgentDemo={onRunAgentDemo} onToggleAutomation={onToggleAutomation} policy={policy} />
             <div className="rounded-lg border border-rail-border bg-rail-black/90 p-5 backdrop-blur">
             <div className="mb-5 flex items-center justify-between gap-4">
               <div>
@@ -597,9 +593,15 @@ function DashboardScreen({ account, activity, health, onCheckHealth, onDeposit, 
               <StatusPill label="Live" tone="blue" />
             </div>
             <div className="grid gap-4">
-              {events.map((event, index) => (
-                <ActivityCard event={event} featured={index === 0} key={event.id} onClick={() => setSelectedEvent(event)} />
-              ))}
+              {events.length > 0 ? (
+                events.map((event, index) => (
+                  <ActivityCard event={event} featured={index === 0} key={event.id} onClick={() => setSelectedEvent(event)} />
+                ))
+              ) : (
+                <div className="rounded-lg border border-dashed border-rail-border p-5 text-sm text-rail-secondary">
+                  No contract activity yet. Create a policy, deposit funds, then run Rail automation or an input swap.
+                </div>
+              )}
             </div>
             </div>
           </div>
@@ -612,12 +614,14 @@ function DashboardScreen({ account, activity, health, onCheckHealth, onDeposit, 
 
 interface DemoOperatorPanelProps {
   health: RailHealth | null;
+  isAutomationRunning: boolean;
   onCheckHealth: () => void;
   onRunAgentDemo: (scenario: AgentDemoScenario, amount?: number) => void;
+  onToggleAutomation: (amount?: number) => void;
   policy: PolicyDraft;
 }
 
-function DemoOperatorPanel({ health, onCheckHealth, onRunAgentDemo, policy }: DemoOperatorPanelProps) {
+function DemoOperatorPanel({ health, isAutomationRunning, onCheckHealth, onRunAgentDemo, onToggleAutomation, policy }: DemoOperatorPanelProps) {
   const [swapAmount, setSwapAmount] = useState(policy.spendPerExecutionUSDC);
   const parsedAmount = Number.isFinite(swapAmount) && swapAmount > 0 ? swapAmount : policy.spendPerExecutionUSDC;
 
@@ -641,13 +645,16 @@ function DemoOperatorPanel({ health, onCheckHealth, onRunAgentDemo, policy }: De
             value={swapAmount}
           />
         </label>
-        <button className="min-h-12 rounded-lg border border-rail-green/40 px-4 text-sm font-semibold text-rail-green transition hover:bg-rail-green/10" onClick={() => onRunAgentDemo("valid", parsedAmount)} type="button">
+        <button className="min-h-12 rounded-lg border border-rail-green/40 px-4 text-sm font-semibold text-rail-green transition hover:bg-rail-green/10" onClick={() => onToggleAutomation(parsedAmount)} type="button">
+          {isAutomationRunning ? "Stop Rail Automation" : "Start Rail Automation"}
+        </button>
+        <button className="min-h-12 rounded-lg border border-rail-blue/40 px-4 text-sm font-semibold text-rail-blue transition hover:bg-rail-blue/10" onClick={() => onRunAgentDemo("valid", parsedAmount)} type="button">
           Run Input Swap
         </button>
         <button className="min-h-12 rounded-lg border border-rail-red/40 px-4 text-sm font-semibold text-rail-red transition hover:bg-rail-red/10" onClick={() => onRunAgentDemo("blocked-slippage", parsedAmount)} type="button">
           Trigger Slippage Block
         </button>
-        <button className="min-h-12 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-blue hover:text-rail-text sm:col-span-2" onClick={onCheckHealth} type="button">
+        <button className="min-h-12 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-blue hover:text-rail-text" onClick={onCheckHealth} type="button">
           Check Backend Health
         </button>
       </div>

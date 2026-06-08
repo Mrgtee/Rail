@@ -15,8 +15,8 @@ export function validatePolicy(policy: AgentActionRequest["policy"]) {
   if (policy.intervalValue <= 0) {
     errors.push("Execution interval must be greater than zero.");
   }
-  if (policy.slippageBps > 500) {
-    errors.push("Slippage cannot exceed 5% in the MVP.");
+  if (policy.slippageBps > 10_000) {
+    errors.push("Slippage cannot exceed 100%.");
   }
   if (!policy.allowedAssets.includes(policy.inputAsset) || !policy.allowedAssets.includes(policy.outputAsset)) {
     errors.push("Input and output assets must be explicitly allowed.");

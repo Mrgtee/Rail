@@ -10,7 +10,6 @@ interface ImportMetaEnv {
   readonly VITE_MOCK_USDC_ADDRESS?: string;
   readonly VITE_MOCK_WETH_ADDRESS?: string;
   readonly VITE_MOCK_ROUTER_ADDRESS?: string;
-  readonly VITE_ENABLE_DEMO_MODE?: string;
 }
 
 interface ImportMeta {

@@ -21,6 +21,7 @@ contract DeployLocal is Script {
         executor = new AgentExecutor(vault, agent);
         vault.setExecutor(address(executor), true);
         router.setRate(address(usdc), address(weth), 10_000);
+        router.setRate(address(weth), address(usdc), 10_000);
         registry.setStrategy(keccak256("DCA"), "DCA", "ipfs://rail-demo-dca", true);
         vm.stopBroadcast();
 

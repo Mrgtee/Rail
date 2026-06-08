@@ -53,7 +53,6 @@ VITE_STRATEGY_REGISTRY_ADDRESS=
 VITE_MOCK_USDC_ADDRESS=
 VITE_MOCK_WETH_ADDRESS=
 VITE_MOCK_ROUTER_ADDRESS=
-VITE_ENABLE_DEMO_MODE=true
 ```
 
 Backend:
@@ -74,7 +73,7 @@ SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
 ```
 
-If `OPENAI_API_KEY` is missing, the backend uses a deterministic policy parser so the demo still works. If contract addresses are missing, the frontend uses demo activation and local agent fallback.
+If `OPENAI_API_KEY` is missing, the backend uses a deterministic policy parser for drafting. Wallet connection, deployed contract addresses, and Robinhood Chain Testnet funds are required for policy activation, deposits, withdrawals, and agent execution.
 
 ## Commands
 
@@ -113,7 +112,7 @@ npm run stylus:check
 1. Start the backend: `npm run dev:backend`.
 2. Start the frontend: `npm run dev:frontend`.
 3. Open the Vite URL.
-4. Connect a browser wallet or use the demo fallback.
+4. Connect a browser wallet funded on Robinhood Chain Testnet.
 5. Enter a goal like: `DCA 20 USDC into ETH every week. Keep 50 USDC liquid. Stop if slippage is above 1%.`
 6. Generate and review the policy.
 7. Sign/activate the policy. Without contract env vars this uses demo mode.
@@ -141,12 +140,12 @@ forge script contracts/script/DeployLocal.s.sol --broadcast --rpc-url $ROBINHOOD
 
 Current Robinhood Chain Testnet deployment:
 
-- PolicyVault: `0x55738e2957c93fe4cf0da169d6066a672e461b79`
-- AgentExecutor: `0xe09e7288adf4d974c230e6daed7d95e8d7737553`
-- StrategyRegistry: `0x90a4662141f105e63ce44b1868af26017d6ef2e9`
-- MockUSDC: `0x0dfddb41d4b43e10434232d3dc617a8aedb30093`
-- MockWETH: `0x147f77bebe41a188614ab73c09de4bff6da6c49f`
-- MockRouter: `0x6cb882d547409db1d56c56c2c15312a18fa71ac3`
+- PolicyVault: `0x3c8c67ea4fbcf779a8b762bc280307b246cb26e5`
+- AgentExecutor: `0x0ed02a082d129e1d6b5444214696aea080b89a93`
+- StrategyRegistry: `0xee3b59d29bb79dd77198483975c5d93690aa28c2`
+- MockUSDC: `0x6c83bd6fc15650bebe6cdc6c86f76a681c6eedc1`
+- MockWETH: `0x1e82131479c4ee5a0d02363ae4858987a1cdab12`
+- MockRouter: `0xbcb860da2dde815ff624d6d0f97b7f7772a59d6f`
 
 Explorer: https://explorer.testnet.chain.robinhood.com
 

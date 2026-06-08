@@ -169,6 +169,17 @@ initTxs.push({
 await waitForWrite(publicClient, initTxs.at(-1).hash, initTxs.at(-1).label);
 
 initTxs.push({
+  label: "MockRouter.setReverseRate",
+  hash: await walletClient.writeContract({
+    address: mockRouter.address,
+    abi: mockRouterArtifact.abi,
+    functionName: "setRate",
+    args: [mockWETH.address, mockUSDC.address, 10_000n],
+  }),
+});
+await waitForWrite(publicClient, initTxs.at(-1).hash, initTxs.at(-1).label);
+
+initTxs.push({
   label: "StrategyRegistry.setStrategy",
   hash: await walletClient.writeContract({
     address: strategyRegistry.address,
