@@ -7,12 +7,12 @@ const wait = (ms: number) =>
   });
 
 export const defaultGoal =
-  "DCA 20 USDC into ETH every 30 seconds. Keep 50 USDC liquid. Stop if slippage is above 1%.";
+  "DCA 20 USDC into ETH every 30 seconds. Stop if slippage is above 1%.";
 
 export const draftingSteps = [
   "Reading goal",
   "Detecting strategy",
-  "Setting spend and reserve limits",
+  "Setting spend and risk limits",
   "Checking supported assets",
   "Preparing policy JSON",
 ];
@@ -42,6 +42,8 @@ export const activationSteps: ActivationStep[] = [
 
 export const disconnectedAccount: UserAccount = {
   status: "disconnected",
+  walletBalanceUSDC: 0,
+  walletBalanceWETH: 0,
   vaultBalanceUSDC: 0,
   vaultBalanceWETH: 0,
   sessionKeyStatus: "inactive",
@@ -54,6 +56,8 @@ export const demoAccount: UserAccount = {
   chainId: primaryChain.id,
   chainName: primaryChain.name,
   ethBalance: 1.42,
+  walletBalanceUSDC: 125,
+  walletBalanceWETH: 0.08,
   vaultBalanceUSDC: 142.8,
   vaultBalanceWETH: 0.42,
   sessionKeyStatus: "active",
@@ -83,7 +87,7 @@ export const samplePolicy: PolicyDraft = {
   intervalUnit: "seconds",
   monthlyCapUSDC: 100,
   slippageBps: 100,
-  minimumReserveUSDC: 50,
+  minimumReserveUSDC: 0,
   expiryDays: 90,
   agentPermission: "Execute only",
   status: "awaiting-signature",
@@ -91,7 +95,7 @@ export const samplePolicy: PolicyDraft = {
   createdAt: now,
   updatedAt: now,
   warnings: ["The agent can execute only through PolicyVault checks."],
-  summary: "DCA guardrails for swapping USDC into ETH every 30 seconds while preserving a 50 USDC reserve.",
+  summary: "DCA guardrails for swapping USDC into ETH every 30 seconds with no reserve unless the user adds one.",
 };
 
 export const dashboardEvents: ActivityEvent[] = [
@@ -155,7 +159,7 @@ export async function generatePolicy(goalText: string, ownerAddress?: string): P
   const slippageMatch = lowerGoal.match(/(\d+(?:\.\d+)?)%\s*slippage|slippage\s*(?:is\s*)?(?:above\s*)?(\d+(?:\.\d+)?)%/);
 
   const spend = spendMatch ? Number(spendMatch[1]) : samplePolicy.spendPerExecutionUSDC;
-  const reserve = reserveMatch ? Number(reserveMatch[1] ?? reserveMatch[2]) : samplePolicy.minimumReserveUSDC;
+  const reserve = reserveMatch ? Number(reserveMatch[1] ?? reserveMatch[2]) : 0;
   const slippage = slippageMatch ? Number(slippageMatch[1] ?? slippageMatch[2]) * 100 : samplePolicy.slippageBps;
   const interval = parseInterval(lowerGoal);
   const outputAsset = detectOutputAsset(lowerGoal);
@@ -176,7 +180,7 @@ export async function generatePolicy(goalText: string, ownerAddress?: string): P
     intervalUnit: interval.intervalUnit,
     monthlyCapUSDC: Math.max(spend * 5, samplePolicy.monthlyCapUSDC),
     status: "awaiting-signature",
-    summary: `DCA ${spend} ${inputAsset} into ${outputAsset} every ${interval.intervalValue} ${interval.intervalUnit} with ${slippage / 100}% max slippage.`,
+    summary: `DCA ${spend} ${inputAsset} into ${outputAsset} every ${interval.intervalValue} ${interval.intervalUnit} with ${slippage / 100}% max slippage${reserve > 0 ? ` and ${reserve} ${inputAsset} reserve` : ""}.`,
     updatedAt: new Date().toISOString(),
   };
 }

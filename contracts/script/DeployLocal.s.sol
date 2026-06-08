@@ -20,8 +20,10 @@ contract DeployLocal is Script {
         vault = new PolicyVault(address(0));
         executor = new AgentExecutor(vault, agent);
         vault.setExecutor(address(executor), true);
-        router.setRate(address(usdc), address(weth), 10_000);
-        router.setRate(address(weth), address(usdc), 10_000);
+        usdc.setMinter(address(router), true);
+        weth.setMinter(address(router), true);
+        router.setPrice(address(usdc), 100_000_000);
+        router.setPrice(address(weth), vm.envOr("WETH_USD_PRICE_E8", uint256(1_600 * 100_000_000)));
         registry.setStrategy(keccak256("DCA"), "DCA", "ipfs://rail-demo-dca", true);
         vm.stopBroadcast();
 

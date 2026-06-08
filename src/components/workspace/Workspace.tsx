@@ -46,6 +46,7 @@ interface ProductWorkspaceProps {
   health: RailHealth | null;
   onCheckHealth: () => void;
   onDeposit: (amount: number, asset: string) => void;
+  onFundWallet: (amount: number, asset: string) => void;
   onGeneratePolicy: () => void;
   onGoalChange: (goal: string) => void;
   onLaunch: () => void;
@@ -75,6 +76,7 @@ export function ProductWorkspace({
   onCheckHealth,
   onConnect,
   onDeposit,
+  onFundWallet,
   onGeneratePolicy,
   onGoalChange,
   onLaunch,
@@ -138,6 +140,7 @@ export function ProductWorkspace({
                 health={health}
                 onCheckHealth={onCheckHealth}
                 onDeposit={onDeposit}
+                onFundWallet={onFundWallet}
                 onPause={onPause}
                 onReset={onReset}
                 onResume={onResume}
@@ -494,6 +497,7 @@ interface DashboardScreenProps {
   health: RailHealth | null;
   onCheckHealth: () => void;
   onDeposit: (amount: number, asset: string) => void;
+  onFundWallet: (amount: number, asset: string) => void;
   onPause: () => void;
   onReset: () => void;
   onResume: () => void;
@@ -505,12 +509,15 @@ interface DashboardScreenProps {
   policy: PolicyDraft;
 }
 
-function DashboardScreen({ account, activity, health, onCheckHealth, onDeposit, onPause, onReset, onResume, onRevoke, onRunAgentDemo, onToggleAutomation, onWithdraw, isAutomationRunning, policy }: DashboardScreenProps) {
+function DashboardScreen({ account, activity, health, onCheckHealth, onDeposit, onFundWallet, onPause, onReset, onResume, onRevoke, onRunAgentDemo, onToggleAutomation, onWithdraw, isAutomationRunning, policy }: DashboardScreenProps) {
   const [selectedEvent, setSelectedEvent] = useState<ActivityEvent | null>(null);
   const events = useMemo(() => activity, [activity]);
   const isPaused = policy.status === "paused";
   const isRevoked = policy.status === "revoked";
   const inputBalance = policy.inputAsset === "ETH" ? account.vaultBalanceWETH : account.vaultBalanceUSDC;
+  const fundAmount = policy.inputAsset === "ETH" ? 0.05 : 100;
+  const depositAmount = policy.inputAsset === "ETH" ? 0.01 : 25;
+  const withdrawAmount = policy.inputAsset === "ETH" ? 0.005 : 10;
 
   return (
     <ScreenFrame eyebrow="Dashboard" title="Your automation is live inside approved rails.">
@@ -524,9 +531,11 @@ function DashboardScreen({ account, activity, health, onCheckHealth, onDeposit, 
         <div className="absolute inset-0 bg-[linear-gradient(110deg,rgba(8,10,13,0.96),rgba(8,10,13,0.76)_52%,rgba(8,10,13,0.92)),radial-gradient(circle_at_76%_18%,rgba(53,229,140,0.16),transparent_34%)]" />
         <div className="relative grid gap-5 p-4 sm:p-5 xl:grid-cols-[0.9fr_1.1fr]">
           <div className="grid gap-5">
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <Metric icon={<Gauge size={18} />} label="rUSDC vault" value={formatAssetAmount(account.vaultBalanceUSDC, "USDC")} />
-              <Metric icon={<Gauge size={18} />} label="Mock WETH vault" value={formatAssetAmount(account.vaultBalanceWETH, "ETH")} />
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <Metric icon={<WalletCards size={18} />} label="Wallet rUSDC" value={formatAssetAmount(account.walletBalanceUSDC, "USDC")} />
+              <Metric icon={<WalletCards size={18} />} label="Wallet rWETH" value={formatAssetAmount(account.walletBalanceWETH, "ETH")} />
+              <Metric icon={<Gauge size={18} />} label="Vault rUSDC" value={formatAssetAmount(account.vaultBalanceUSDC, "USDC")} />
+              <Metric icon={<Gauge size={18} />} label="Vault rWETH" value={formatAssetAmount(account.vaultBalanceWETH, "ETH")} />
               <Metric icon={<Play size={18} />} label="Next action" value={isPaused || isRevoked ? "Stopped" : intervalLabel(policy)} />
               <Metric icon={<WalletCards size={18} />} label="Session key" value={account.sessionKeyStatus} />
             </div>
@@ -544,24 +553,32 @@ function DashboardScreen({ account, activity, health, onCheckHealth, onDeposit, 
                 <PolicyField label="Cadence" value={intervalLabel(policy)} />
                 <PolicyField label="Input vault" value={formatAssetAmount(inputBalance, policy.inputAsset)} />
                 <PolicyField label="Slippage limit" value={formatSlippage(policy.slippageBps)} />
-                <PolicyField label="Minimum reserve" value={formatAssetAmount(policy.minimumReserveUSDC, policy.inputAsset)} />
+                <PolicyField label="Minimum reserve" value={policy.minimumReserveUSDC > 0 ? formatAssetAmount(policy.minimumReserveUSDC, policy.inputAsset) : "None set"} />
               </div>
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
                 <button
                   className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-green hover:text-rail-text"
-                  onClick={() => onDeposit(25, policy.inputAsset)}
+                  onClick={() => onFundWallet(fundAmount, policy.inputAsset)}
+                  type="button"
+                >
+                  <WalletCards size={17} />
+                  Fund wallet {fundAmount} {assetTicker(policy.inputAsset)}
+                </button>
+                <button
+                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-green hover:text-rail-text"
+                  onClick={() => onDeposit(depositAmount, policy.inputAsset)}
                   type="button"
                 >
                   <ArrowRight size={17} />
-                  Deposit 25 {assetTicker(policy.inputAsset)}
+                  Deposit {depositAmount} {assetTicker(policy.inputAsset)}
                 </button>
                 <button
                   className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-blue hover:text-rail-text"
-                  onClick={() => onWithdraw(10, policy.inputAsset)}
+                  onClick={() => onWithdraw(withdrawAmount, policy.inputAsset)}
                   type="button"
                 >
                   <RotateCcw size={17} />
-                  Withdraw 10 {assetTicker(policy.inputAsset)}
+                  Withdraw {withdrawAmount} {assetTicker(policy.inputAsset)}
                 </button>
                 <button
                   className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-rail-border px-4 text-sm font-semibold text-rail-secondary transition hover:border-rail-amber hover:text-rail-text"

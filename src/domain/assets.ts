@@ -11,7 +11,7 @@ export function pairedSwapAsset(asset: string): SwapAsset {
 }
 
 export function displayAsset(asset: string) {
-  return asset === "ETH" ? "mock WETH" : "rUSDC";
+  return asset === "ETH" ? "rWETH" : "rUSDC";
 }
 
 export function assetTicker(asset: string) {

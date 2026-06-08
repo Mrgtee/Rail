@@ -115,7 +115,7 @@ function RailRouteVisual() {
           </svg>
           <div className="relative grid w-full grid-cols-1 gap-4 md:grid-cols-[1fr_0.9fr]">
             <VisualPanel title="User goal" tone="blue">
-              DCA 20 USDC into ETH every week. Keep 50 USDC liquid. Stop above 1% slippage.
+              DCA 20 USDC into ETH every week. Stop above 1% slippage.
             </VisualPanel>
             <VisualPanel title="Contract check" tone="red">
               Blocked: route quote exceeded signed slippage limit. Funds moved: 0 USDC.
@@ -193,7 +193,7 @@ export function LandingStory({ onLaunch }: LandingStoryProps) {
               Turn an investing instruction into explicit limits.
             </StepBlock>
             <StepBlock icon={<SlidersHorizontal size={20} />} title="Approve your rails">
-              Review spend, assets, slippage, reserve, and expiry.
+              Review spend, assets, slippage, optional reserve, and expiry.
             </StepBlock>
             <StepBlock icon={<ShieldCheck size={20} />} title="Let it execute safely">
               Every action has to pass the contract first.

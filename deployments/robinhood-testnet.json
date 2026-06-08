@@ -2,51 +2,63 @@
   "chainId": 46630,
   "chainName": "Robinhood Chain Testnet",
   "explorer": "https://explorer.testnet.chain.robinhood.com",
-  "deployedAt": "2026-06-08T07:15:13.070Z",
+  "deployedAt": "2026-06-08T09:35:43.642Z",
   "deployer": "0x5c3f910eC4495401605d2F8eB67C570004C1fbC8",
   "agent": "0x5c3f910ec4495401605d2f8eb67c570004c1fbc8",
   "contracts": {
     "policyVault": {
-      "address": "0x3c8c67ea4fbcf779a8b762bc280307b246cb26e5",
-      "txHash": "0x3a65fe8e350ff3a84253e5d82011dc34c68345a9db15a28c3f61ddcac17e8a3a"
+      "address": "0xeb56aef6753d8ba0877154be0a54709809408d28",
+      "txHash": "0xb9e398e35db923dca8fa6d68b1ccad5bd67e03f5b40c334d504fb8ee1befc182"
     },
     "agentExecutor": {
-      "address": "0x0ed02a082d129e1d6b5444214696aea080b89a93",
-      "txHash": "0xfd6dcfd05bb3b3de436b7b89fb7f79d9cf7a51bf42d5b29902d5569412eaa111"
+      "address": "0x748e33595c31c79b140b2c2ab035373c9459da32",
+      "txHash": "0x0c33bff4f9d8f08e942954c2b0d32c73302207b09e929fa49a193364b6b343cd"
     },
     "strategyRegistry": {
-      "address": "0xee3b59d29bb79dd77198483975c5d93690aa28c2",
-      "txHash": "0x37088af882c7e51640114a1144c7ef01b9ec71bed84c1cabf895d60c55f6b426"
+      "address": "0x1725ec14566f07ba0b52072358354c496c0458c4",
+      "txHash": "0x1887cd0a0c8bb820b010cfe5404ffb0034f51e99dc2205cf31db040ec7345efe"
     },
     "mockUSDC": {
-      "address": "0x6c83bd6fc15650bebe6cdc6c86f76a681c6eedc1",
-      "txHash": "0x17564f5cd0fad4d249563d0419a805e7ad805e91015d77fdb7469aedb58d9292"
+      "address": "0xa91cea564593980b8c31c85c95e723a8ffdbb3c5",
+      "txHash": "0xf82cb3390ea5400be3b583bfc7a6f10eaecddeadf1c61912e6d03e44448a6aad"
     },
     "mockWETH": {
-      "address": "0x1e82131479c4ee5a0d02363ae4858987a1cdab12",
-      "txHash": "0xdba322776d7adb5cbd1699084b2103684633f576e0d5d9f61a03b21488617af1"
+      "address": "0x44c36bb8f2f445eae226407325a7bbda17542e74",
+      "txHash": "0xb207a1a92441e9d529d1bd26472b1d302e0df5abb99a285b4f1cf1204a60cb61"
     },
     "mockRouter": {
-      "address": "0xbcb860da2dde815ff624d6d0f97b7f7772a59d6f",
-      "txHash": "0xe136a962dd75f3a10dc8505ac4ae0a44386a87ab61ad44592fae98f75d6b7a2d"
+      "address": "0xb0e9d87b95361d04e108560811e617f6306c210e",
+      "txHash": "0x55b6b4b23715e28b7780cc352b000246fabe9350658048282773dd30f83e7e2f"
     }
+  },
+  "prices": {
+    "usdcUsdE8": "100000000",
+    "wethUsdE8": "160000000000"
   },
   "initialization": [
     {
       "label": "PolicyVault.setExecutor",
-      "hash": "0x3b613c44504dcf1f06da55f3da1edfc56a4c39563e56b1725086fc3623c36d35"
+      "hash": "0x9c7a0a7faaacafe62e5a5766523d948d2a5293ca5627434baa08b317870c5457"
     },
     {
-      "label": "MockRouter.setRate",
-      "hash": "0x5311fcf517fa2cb30bf7c8ddeb1b3a6f29253a1e6deafe6391073dfffca7d9a4"
+      "label": "MockUSDC.setRouterMinter",
+      "hash": "0xcf8845047f48b432b02b35a0aec4ecfd19a5dc68e71018b9b8ef554588307d90"
     },
     {
-      "label": "MockRouter.setReverseRate",
-      "hash": "0x7c03af17c599803f1350553d67d42e3a29c7b373ecdbf59323f06196480210aa"
+      "label": "MockWETH.setRouterMinter",
+      "hash": "0xaef62d57b7e0be174d2f5162103042146a3e2b040e103edf3812baef82c52e3c"
+    },
+    {
+      "label": "MockRouter.setUSDCPrice",
+      "hash": "0xc3a28f762889197030d6b60ac6f8017dbe68c0e0afd7bacc47a240da861596e6"
+    },
+    {
+      "label": "MockRouter.setWETHPrice",
+      "hash": "0xb6b516bccadf71f02200256ce2ef1af6602df4d6a95f4d14492aa65f18c404b7"
     },
     {
       "label": "StrategyRegistry.setStrategy",
-      "hash": "0xe4148fa3d118446505f82dd4dc38f2cd169a83a053ef3fbfb35daf9257619844"
+      "hash": "0x4b7f2db0fe418af572db8bb4f7e1e6d4aa3b2060848e914e97baf55cc34c49cf"
     }
   ]
 }

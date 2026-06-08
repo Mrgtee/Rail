@@ -35,7 +35,7 @@ export function policyFields(policy: PolicyDraft) {
     { label: "Period cap", value: formatAssetAmount(policy.monthlyCapUSDC, policy.inputAsset) },
     { label: "Allowed pair", value: policyRoute(policy) },
     { label: "Slippage limit", value: formatSlippage(policy.slippageBps) },
-    { label: "Minimum reserve", value: formatAssetAmount(policy.minimumReserveUSDC, policy.inputAsset) },
+    { label: "Minimum reserve", value: policy.minimumReserveUSDC > 0 ? formatAssetAmount(policy.minimumReserveUSDC, policy.inputAsset) : "None set" },
     { label: "Expiry", value: `${policy.expiryDays} days` },
     { label: "Agent permission", value: policy.agentPermission },
   ];

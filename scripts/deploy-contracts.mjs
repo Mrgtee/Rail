@@ -105,6 +105,8 @@ const rpcUrl = getEnv("ROBINHOOD_RPC_URL", { required: true });
 const privateKey = getEnv("AGENT_PRIVATE_KEY", { required: true });
 const account = privateKeyToAccount(privateKey.startsWith("0x") ? privateKey : `0x${privateKey}`);
 const agentAddress = getEnv("AGENT_ADDRESS") || account.address;
+const usdcUsdPriceE8 = BigInt(getEnv("USDC_USD_PRICE_E8") || "100000000");
+const wethUsdPriceE8 = BigInt(getEnv("WETH_USD_PRICE_E8") || "160000000000");
 
 const robinhoodTestnet = {
   id: 46630,
@@ -157,24 +159,37 @@ initTxs.push({
 });
 await waitForWrite(publicClient, initTxs.at(-1).hash, initTxs.at(-1).label);
 
+for (const token of [mockUSDC, mockWETH]) {
+  initTxs.push({
+    label: `${token === mockUSDC ? "MockUSDC" : "MockWETH"}.setRouterMinter`,
+    hash: await walletClient.writeContract({
+      address: token.address,
+      abi: artifact("MockUSDC").abi,
+      functionName: "setMinter",
+      args: [mockRouter.address, true],
+    }),
+  });
+  await waitForWrite(publicClient, initTxs.at(-1).hash, initTxs.at(-1).label);
+}
+
 initTxs.push({
-  label: "MockRouter.setRate",
+  label: "MockRouter.setUSDCPrice",
   hash: await walletClient.writeContract({
     address: mockRouter.address,
     abi: mockRouterArtifact.abi,
-    functionName: "setRate",
-    args: [mockUSDC.address, mockWETH.address, 10_000n],
+    functionName: "setPrice",
+    args: [mockUSDC.address, usdcUsdPriceE8],
   }),
 });
 await waitForWrite(publicClient, initTxs.at(-1).hash, initTxs.at(-1).label);
 
 initTxs.push({
-  label: "MockRouter.setReverseRate",
+  label: "MockRouter.setWETHPrice",
   hash: await walletClient.writeContract({
     address: mockRouter.address,
     abi: mockRouterArtifact.abi,
-    functionName: "setRate",
-    args: [mockWETH.address, mockUSDC.address, 10_000n],
+    functionName: "setPrice",
+    args: [mockWETH.address, wethUsdPriceE8],
   }),
 });
 await waitForWrite(publicClient, initTxs.at(-1).hash, initTxs.at(-1).label);
@@ -207,6 +222,10 @@ const deployment = {
     mockWETH: { address: mockWETH.address, txHash: mockWETH.txHash },
     mockRouter: { address: mockRouter.address, txHash: mockRouter.txHash },
   },
+  prices: {
+    usdcUsdE8: usdcUsdPriceE8.toString(),
+    wethUsdE8: wethUsdPriceE8.toString(),
+  },
   initialization: initTxs,
 };
 
@@ -225,6 +244,8 @@ updateEnvFile(envPath, {
   MOCK_USDC_ADDRESS: mockUSDC.address,
   MOCK_WETH_ADDRESS: mockWETH.address,
   MOCK_ROUTER_ADDRESS: mockRouter.address,
+  USDC_USD_PRICE_E8: usdcUsdPriceE8.toString(),
+  WETH_USD_PRICE_E8: wethUsdPriceE8.toString(),
 });
 
 console.log(`Wrote ${path.relative(root, deploymentPath)}`);

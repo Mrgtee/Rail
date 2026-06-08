@@ -69,6 +69,8 @@ STRATEGY_REGISTRY_ADDRESS=
 MOCK_USDC_ADDRESS=
 MOCK_WETH_ADDRESS=
 MOCK_ROUTER_ADDRESS=
+USDC_USD_PRICE_E8=100000000
+WETH_USD_PRICE_E8=160000000000
 SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
 ```
@@ -113,7 +115,7 @@ npm run stylus:check
 2. Start the frontend: `npm run dev:frontend`.
 3. Open the Vite URL.
 4. Connect a browser wallet funded on Robinhood Chain Testnet.
-5. Enter a goal like: `DCA 20 USDC into ETH every week. Keep 50 USDC liquid. Stop if slippage is above 1%.`
+5. Enter a goal like: `DCA 20 USDC into ETH every week. Stop if slippage is above 1%.` Add `Keep 50 USDC liquid` only when you want an explicit reserve.
 6. Generate and review the policy.
 7. Sign/activate the policy. Without contract env vars this uses demo mode.
 8. On the dashboard, run:
@@ -130,7 +132,7 @@ Foundry project settings live in `foundry.toml`. This repo also includes a Node/
 npm run contracts:deploy:robinhood
 ```
 
-The deploy script reads `.env.local`, deploys the Rail contracts to Robinhood Chain Testnet, initializes the executor/router/strategy settings, writes public metadata to `deployments/robinhood-testnet.json`, and updates local address fields in `.env.local`.
+The deploy script reads `.env.local`, deploys the Rail contracts to Robinhood Chain Testnet, initializes executor authorization, router minter permissions, router token prices, and strategy settings, writes public metadata to `deployments/robinhood-testnet.json`, and updates local address fields in `.env.local`.
 
 Optional Foundry path when `forge` is installed:
 
@@ -140,14 +142,16 @@ forge script contracts/script/DeployLocal.s.sol --broadcast --rpc-url $ROBINHOOD
 
 Current Robinhood Chain Testnet deployment:
 
-- PolicyVault: `0x3c8c67ea4fbcf779a8b762bc280307b246cb26e5`
-- AgentExecutor: `0x0ed02a082d129e1d6b5444214696aea080b89a93`
-- StrategyRegistry: `0xee3b59d29bb79dd77198483975c5d93690aa28c2`
-- MockUSDC: `0x6c83bd6fc15650bebe6cdc6c86f76a681c6eedc1`
-- MockWETH: `0x1e82131479c4ee5a0d02363ae4858987a1cdab12`
-- MockRouter: `0xbcb860da2dde815ff624d6d0f97b7f7772a59d6f`
+- PolicyVault: `0xeb56aef6753d8ba0877154be0a54709809408d28`
+- AgentExecutor: `0x748e33595c31c79b140b2c2ab035373c9459da32`
+- StrategyRegistry: `0x1725ec14566f07ba0b52072358354c496c0458c4`
+- MockUSDC: `0xa91cea564593980b8c31c85c95e723a8ffdbb3c5`
+- MockWETH: `0x44c36bb8f2f445eae226407325a7bbda17542e74`
+- MockRouter: `0xb0e9d87b95361d04e108560811e617f6306c210e`
 
 Explorer: https://explorer.testnet.chain.robinhood.com
+
+Router prices: rUSDC = 1 USD, rWETH = 1600 USD.
 
 
 ## Verification performed

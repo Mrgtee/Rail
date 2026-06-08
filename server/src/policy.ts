@@ -3,6 +3,10 @@ import type { PolicyDraftRequest, RailPolicy } from "./schemas.js";
 
 const now = () => new Date().toISOString();
 
+function hasNumber(patterns: RegExp[], text: string) {
+  return patterns.some((pattern) => pattern.test(text));
+}
+
 function readNumber(patterns: RegExp[], text: string, fallback: number) {
   for (const pattern of patterns) {
     const match = text.match(pattern);
@@ -41,7 +45,8 @@ function detectOutputAsset(goal: string) {
 export function deterministicPolicyDraft(request: PolicyDraftRequest): RailPolicy {
   const goal = request.goal.toLowerCase();
   const spend = readNumber([/(\d+(?:\.\d+)?)\s*(?:usdc|eth|weth)/, /spend\s+(\d+(?:\.\d+)?)/], goal, 20);
-  const reserve = readNumber([/keep\s+(\d+(?:\.\d+)?)\s*(?:usdc|eth|weth)/, /reserve\s+(\d+(?:\.\d+)?)\s*(?:usdc|eth|weth)/], goal, 50);
+  const reservePatterns = [/keep\s+(\d+(?:\.\d+)?)\s*(?:usdc|eth|weth)/, /reserve\s+(\d+(?:\.\d+)?)\s*(?:usdc|eth|weth)/];
+  const reserve = readNumber(reservePatterns, goal, 0);
   const slippagePercent = readNumber([/(\d+(?:\.\d+)?)%\s*slippage/, /slippage\s*(?:above|over|at)?\s*(\d+(?:\.\d+)?)%/], goal, 1);
   const interval = parseInterval(goal);
   const outputAsset = detectOutputAsset(goal);
@@ -70,7 +75,7 @@ export function deterministicPolicyDraft(request: PolicyDraftRequest): RailPolic
     createdAt,
     updatedAt: createdAt,
     warnings: ["AI drafts only. User signature is required before activation.", "Agent execution must pass PolicyVault checks."],
-    summary: `DCA ${spend} ${inputAsset} into ${outputAsset} every ${interval.intervalValue} ${interval.intervalUnit} with ${slippagePercent}% max slippage.`,
+    summary: `DCA ${spend} ${inputAsset} into ${outputAsset} every ${interval.intervalValue} ${interval.intervalUnit} with ${slippagePercent}% max slippage${reserve > 0 ? ` and ${reserve} ${inputAsset} reserve` : ""}.`,
   };
 }
 
@@ -85,7 +90,7 @@ export async function draftPolicy(request: PolicyDraftRequest) {
     const response = await (client.responses as any).create({
       model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
       input: [
-        { role: "system", content: "Extract a conservative Rail policy. Return only valid JSON matching the requested schema. Supported assets are USDC and ETH." },
+        { role: "system", content: "Extract a Rail policy. Return only valid JSON matching the requested schema. Supported assets are USDC and ETH. Do not invent a minimum reserve: if the user did not explicitly say keep/reserve a token amount, set minimumReserveUSDC to 0." },
         { role: "user", content: request.goal },
       ],
       text: {
@@ -114,6 +119,7 @@ export async function draftPolicy(request: PolicyDraftRequest) {
     const raw = response.output_text ? JSON.parse(response.output_text) : {};
     const inputAsset = raw.inputAsset && raw.inputAsset !== raw.outputAsset ? raw.inputAsset : fallback.inputAsset;
     const outputAsset = raw.outputAsset && raw.outputAsset !== inputAsset ? raw.outputAsset : fallback.outputAsset;
+    const reserveWasExplicit = hasNumber([/keep\s+(\d+(?:\.\d+)?)\s*(?:usdc|eth|weth)/, /reserve\s+(\d+(?:\.\d+)?)\s*(?:usdc|eth|weth)/], request.goal.toLowerCase());
     const intervalUnit = raw.intervalUnit || fallback.intervalUnit;
     const frequency = intervalUnit === "days" ? "Daily" : intervalUnit === "years" ? "Monthly" : "Weekly";
 
@@ -126,6 +132,7 @@ export async function draftPolicy(request: PolicyDraftRequest) {
         allowedAssets: [inputAsset, outputAsset],
         intervalValue: Math.max(1, Math.floor(Number(raw.intervalValue || fallback.intervalValue))),
         intervalUnit,
+        minimumReserveUSDC: reserveWasExplicit ? Math.max(0, Number(raw.minimumReserveUSDC ?? fallback.minimumReserveUSDC)) : 0,
         frequency,
         updatedAt: now(),
       },

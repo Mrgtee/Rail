@@ -51,10 +51,13 @@ export function RailApp() {
     canWriteContracts,
     createPolicy: createPolicyOnchain,
     depositAsset,
+    fundWallet,
     pausePolicy: pausePolicyOnchain,
     resumePolicy: resumePolicyOnchain,
     revokePolicy: revokePolicyOnchain,
     refreshBalances,
+    tokenBalanceUSDC,
+    tokenBalanceWETH,
     vaultBalanceUSDC,
     vaultBalanceWETH,
     withdrawAsset,
@@ -173,18 +176,6 @@ export function RailApp() {
       .then((result) => {
         pushActivity(result.activity);
         if (result.status === "executed") {
-          const executedAmount = overrides.amountUSDC ?? activePolicy.spendPerExecutionUSDC;
-          setAccount((current) => ({
-            ...current,
-            vaultBalanceUSDC:
-              activePolicy.inputAsset === "USDC"
-                ? Math.max(0, current.vaultBalanceUSDC - executedAmount)
-                : current.vaultBalanceUSDC + (activePolicy.outputAsset === "USDC" ? executedAmount : 0),
-            vaultBalanceWETH:
-              activePolicy.inputAsset === "ETH"
-                ? Math.max(0, current.vaultBalanceWETH - executedAmount)
-                : current.vaultBalanceWETH + (activePolicy.outputAsset === "ETH" ? executedAmount : 0),
-          }));
           void refreshBalances();
         }
       })
@@ -320,20 +311,24 @@ export function RailApp() {
 
 
   useEffect(() => {
-    if (vaultBalanceUSDC === undefined && vaultBalanceWETH === undefined) {
+    if (tokenBalanceUSDC === undefined && tokenBalanceWETH === undefined && vaultBalanceUSDC === undefined && vaultBalanceWETH === undefined) {
       return;
     }
 
     setAccount((current) => ({
       ...current,
+      walletBalanceUSDC: tokenBalanceUSDC ?? current.walletBalanceUSDC,
+      walletBalanceWETH: tokenBalanceWETH ?? current.walletBalanceWETH,
       vaultBalanceUSDC: vaultBalanceUSDC ?? current.vaultBalanceUSDC,
       vaultBalanceWETH: vaultBalanceWETH ?? current.vaultBalanceWETH,
     }));
-  }, [vaultBalanceUSDC, vaultBalanceWETH]);
+  }, [tokenBalanceUSDC, tokenBalanceWETH, vaultBalanceUSDC, vaultBalanceWETH]);
 
   useEffect(() => {
     setAccount((current) => ({
       ...railWallet.account,
+      walletBalanceUSDC: current.walletBalanceUSDC,
+      walletBalanceWETH: current.walletBalanceWETH,
       vaultBalanceUSDC: current.vaultBalanceUSDC,
       vaultBalanceWETH: current.vaultBalanceWETH,
     }));
@@ -465,6 +460,56 @@ export function RailApp() {
     }
   }, [activePolicy.status, isAutomationRunning]);
 
+  const handleFundWallet = (amount: number, asset: string) => {
+    void (async () => {
+      if (!account.address || !canWriteContracts) {
+        throw new Error("Connect your wallet on Robinhood Chain Testnet before funding test tokens.");
+      }
+
+      const result = await fundWallet(asset, amount);
+      setAccount((current) => ({
+        ...current,
+        walletBalanceUSDC: asset === "USDC" ? current.walletBalanceUSDC + amount : current.walletBalanceUSDC,
+        walletBalanceWETH: asset === "ETH" ? current.walletBalanceWETH + amount : current.walletBalanceWETH,
+      }));
+      pushActivity(
+        createLocalActivity({
+          kind: "executed",
+          policyId: activePolicy.id,
+          title: "Funded wallet with " + amount + " " + assetTicker(asset),
+          attempted: "Mint test token to connected wallet",
+          reason: "Wallet confirmed the token faucet transaction. Add the token contract to your wallet to see this balance there.",
+          rule: "Testnet faucet",
+          fundsMoved: amount + " " + assetTicker(asset),
+          actionType: "faucet",
+          txHash: result.faucetHash,
+          transaction: {
+            chainId: activePolicy.chainId,
+            contractAddress: asset === "ETH" ? contractAddresses.mockWETH : contractAddresses.mockUSDC,
+            hash: result.faucetHash,
+            status: "confirmed",
+          },
+        }),
+      );
+      void refreshBalances();
+    })().catch((error) => {
+      pushActivity(
+        createLocalActivity({
+          kind: "failed",
+          policyId: activePolicy.id,
+          title: "Wallet funding failed",
+          attempted: "Mint test token to connected wallet",
+          reason: error instanceof Error ? error.message : "Token faucet transaction failed.",
+          rule: "Testnet faucet",
+          fundsMoved: "0 " + assetTicker(asset),
+          actionType: "faucet",
+          simulationResult: "failed",
+          transaction: { chainId: activePolicy.chainId, contractAddress: asset === "ETH" ? contractAddresses.mockWETH : contractAddresses.mockUSDC, status: "failed" },
+        }),
+      );
+    });
+  };
+
   const handleDeposit = (amount: number, asset: string) => {
     void (async () => {
       if (!account.address || !canWriteContracts) {
@@ -474,6 +519,8 @@ export function RailApp() {
       const result = await depositAsset(asset, amount);
       setAccount((current) => ({
         ...current,
+        walletBalanceUSDC: asset === "USDC" ? Math.max(0, current.walletBalanceUSDC - amount) : current.walletBalanceUSDC,
+        walletBalanceWETH: asset === "ETH" ? Math.max(0, current.walletBalanceWETH - amount) : current.walletBalanceWETH,
         vaultBalanceUSDC: asset === "USDC" ? current.vaultBalanceUSDC + amount : current.vaultBalanceUSDC,
         vaultBalanceWETH: asset === "ETH" ? current.vaultBalanceWETH + amount : current.vaultBalanceWETH,
       }));
@@ -481,9 +528,9 @@ export function RailApp() {
         createLocalActivity({
           kind: "executed",
           policyId: activePolicy.id,
-          title: "Deposited " + amount + " " + assetTicker(asset) + " onchain",
-          attempted: "Mint demo " + assetTicker(asset) + ", approve PolicyVault, deposit funds",
-          reason: "Wallet confirmed the test token mint, allowance approval, and PolicyVault deposit.",
+          title: "Deposited " + amount + " " + assetTicker(asset) + " into PolicyVault",
+          attempted: "Approve token and deposit existing wallet funds",
+          reason: "Wallet confirmed token allowance and PolicyVault deposit. Tokens moved from wallet balance to vault balance.",
           rule: "User-confirmed deposit",
           fundsMoved: amount + " " + assetTicker(asset),
           actionType: "deposit",
@@ -503,8 +550,8 @@ export function RailApp() {
           kind: "failed",
           policyId: activePolicy.id,
           title: "Deposit failed",
-          attempted: "Deposit funds into PolicyVault",
-          reason: error instanceof Error ? error.message : "Deposit transaction failed.",
+          attempted: "Deposit existing wallet funds into PolicyVault",
+          reason: error instanceof Error ? error.message : "Deposit transaction failed. Fund your wallet before depositing.",
           rule: "Token approval and vault deposit",
           fundsMoved: "0 " + assetTicker(asset),
           actionType: "deposit",
@@ -524,6 +571,8 @@ export function RailApp() {
       const txHash = await withdrawAsset(asset, amount);
       setAccount((current) => ({
         ...current,
+        walletBalanceUSDC: asset === "USDC" ? current.walletBalanceUSDC + amount : current.walletBalanceUSDC,
+        walletBalanceWETH: asset === "ETH" ? current.walletBalanceWETH + amount : current.walletBalanceWETH,
         vaultBalanceUSDC: asset === "USDC" ? Math.max(0, current.vaultBalanceUSDC - amount) : current.vaultBalanceUSDC,
         vaultBalanceWETH: asset === "ETH" ? Math.max(0, current.vaultBalanceWETH - amount) : current.vaultBalanceWETH,
       }));
@@ -588,6 +637,7 @@ export function RailApp() {
               onCheckHealth={handleCheckHealth}
               onConnect={handleConnectWallet}
               onDeposit={handleDeposit}
+              onFundWallet={handleFundWallet}
               onGeneratePolicy={handleGeneratePolicy}
               onGoalChange={setGoal}
               onLaunch={() => moveToApp("connect")}

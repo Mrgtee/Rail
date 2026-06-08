@@ -25,7 +25,10 @@ contract PolicyVaultTest is Test {
         vault = new PolicyVault(address(0));
         executor = new AgentExecutor(vault, agent);
         vault.setExecutor(address(executor), true);
-        router.setRate(address(usdc), address(weth), 10_000);
+        usdc.setMinter(address(router), true);
+        weth.setMinter(address(router), true);
+        router.setPrice(address(usdc), 100_000_000);
+        router.setPrice(address(weth), 2_500 * 100_000_000);
 
         usdc.mint(user, 1_000e6);
         vm.startPrank(user);
@@ -45,9 +48,9 @@ contract PolicyVaultTest is Test {
         vm.prank(agent);
         uint256 amountOut = executor.execute(policyId, address(router), 20e6, 100, 480e6, "");
 
-        assertEq(amountOut, 20e18);
+        assertEq(amountOut, 8e15);
         assertEq(vault.vaultBalanceOf(user, address(usdc)), 480e6);
-        assertEq(vault.vaultBalanceOf(user, address(weth)), 20e18);
+        assertEq(vault.vaultBalanceOf(user, address(weth)), 8e15);
     }
 
     function testBlocksOverspend() public {
@@ -63,9 +66,15 @@ contract PolicyVaultTest is Test {
     }
 
     function testBlocksReserveViolation() public {
+        PolicyVault.PolicyConfig memory config = _defaultPolicy();
+        config.minimumReserve = 50e6;
+
+        vm.prank(user);
+        uint256 reservePolicyId = vault.createPolicy(config);
+
         vm.prank(agent);
         vm.expectRevert(bytes("Rail: reserve violated"));
-        executor.execute(policyId, address(router), 20e6, 100, 40e6, "");
+        executor.execute(reservePolicyId, address(router), 20e6, 100, 40e6, "");
     }
 
     function testBlocksExpiredPolicy() public {
@@ -107,7 +116,7 @@ contract PolicyVaultTest is Test {
             spendLimit: 20e6,
             monthlyCap: 100e6,
             slippageBps: 100,
-            minimumReserve: 50e6,
+            minimumReserve: 0,
             cooldownSeconds: 1 days,
             expiresAt: uint64(block.timestamp + 90 days),
             agent: agent

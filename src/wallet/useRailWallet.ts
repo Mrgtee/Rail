@@ -28,6 +28,8 @@ export function useRailWallet() {
     chainId,
     chainName: getSupportedChainName(chainId),
     ethBalance: balance ? Number(formatEther(balance.value)) : undefined,
+    walletBalanceUSDC: 0,
+    walletBalanceWETH: 0,
     vaultBalanceUSDC: 0,
     vaultBalanceWETH: 0,
     sessionKeyStatus: isConnected && walletStatus === "connected" ? "active" : "inactive",

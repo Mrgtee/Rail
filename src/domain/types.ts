@@ -19,6 +19,8 @@ export interface UserAccount {
   chainId?: number;
   chainName?: string;
   ethBalance?: number;
+  walletBalanceUSDC: number;
+  walletBalanceWETH: number;
   vaultBalanceUSDC: number;
   vaultBalanceWETH: number;
   sessionKeyStatus: "inactive" | "active" | "expired";
@@ -86,7 +88,7 @@ export interface AgentAction {
   id: string;
   policyId: string;
   status: ActivityKind;
-  actionType: "dca-swap" | "pause" | "deposit" | "withdraw" | "policy-update";
+  actionType: "dca-swap" | "pause" | "faucet" | "deposit" | "withdraw" | "policy-update";
   attempted: string;
   rule: string;
   reason: string;

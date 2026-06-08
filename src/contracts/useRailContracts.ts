@@ -48,8 +48,11 @@ export interface OnchainPolicyResult {
   policyId?: string;
 }
 
+export interface OnchainFundResult {
+  faucetHash: Hash;
+}
+
 export interface OnchainDepositResult {
-  mintHash: Hash;
   approveHash: Hash;
   depositHash: Hash;
 }
@@ -93,12 +96,20 @@ export function useRailContracts(account: UserAccount) {
     return undefined;
   }, [policyVault]);
 
-  const { data: tokenBalance, refetch: refetchTokenBalance } = useReadContract({
+  const { data: tokenBalanceUSDC, refetch: refetchTokenBalanceUSDC } = useReadContract({
     address: usdc.address,
     abi: mockUSDCAbi,
     functionName: "balanceOf",
     args: [owner],
     query: { enabled: contractsConfigured && account.status === "connected" && owner !== zeroAddress && usdc.address !== zeroAddress },
+  });
+
+  const { data: tokenBalanceWETH, refetch: refetchTokenBalanceWETH } = useReadContract({
+    address: weth.address,
+    abi: mockUSDCAbi,
+    functionName: "balanceOf",
+    args: [owner],
+    query: { enabled: contractsConfigured && account.status === "connected" && owner !== zeroAddress && weth.address !== zeroAddress },
   });
 
   const { data: vaultBalanceUSDC, refetch: refetchVaultBalanceUSDC } = useReadContract({
@@ -118,8 +129,8 @@ export function useRailContracts(account: UserAccount) {
   });
 
   const refreshBalances = useCallback(async () => {
-    await Promise.all([refetchTokenBalance(), refetchVaultBalanceUSDC(), refetchVaultBalanceWETH()]);
-  }, [refetchTokenBalance, refetchVaultBalanceUSDC, refetchVaultBalanceWETH]);
+    await Promise.all([refetchTokenBalanceUSDC(), refetchTokenBalanceWETH(), refetchVaultBalanceUSDC(), refetchVaultBalanceWETH()]);
+  }, [refetchTokenBalanceUSDC, refetchTokenBalanceWETH, refetchVaultBalanceUSDC, refetchVaultBalanceWETH]);
 
   const createPolicy = useCallback(async (policy: PolicyDraft): Promise<OnchainPolicyResult> => {
     if (!contractsConfigured) {
@@ -152,6 +163,25 @@ export function useRailContracts(account: UserAccount) {
     return { hash, policyId: extractPolicyId(receipt) };
   }, [extractPolicyId, policyVault, waitForSuccess, writeContractAsync]);
 
+  const fundWallet = useCallback(async (asset: string, amountValue: number): Promise<OnchainFundResult> => {
+    if (!contractsConfigured) {
+      throw new Error("Rail contracts are not configured.");
+    }
+
+    const token = tokenForAsset(asset);
+    const amount = parseUnits(String(amountValue), token.decimals);
+    const faucetHash = await writeContractAsync({
+      address: token.address,
+      abi: mockUSDCAbi,
+      functionName: "faucet",
+      args: [amount],
+    });
+    await waitForSuccess(faucetHash);
+    await refreshBalances();
+
+    return { faucetHash };
+  }, [refreshBalances, waitForSuccess, writeContractAsync]);
+
   const depositAsset = useCallback(async (asset: string, amountValue: number): Promise<OnchainDepositResult> => {
     if (!contractsConfigured) {
       throw new Error("Rail contracts are not configured.");
@@ -159,13 +189,6 @@ export function useRailContracts(account: UserAccount) {
 
     const token = tokenForAsset(asset);
     const amount = parseUnits(String(amountValue), token.decimals);
-    const mintHash = await writeContractAsync({
-      address: token.address,
-      abi: mockUSDCAbi,
-      functionName: "mint",
-      args: [owner, amount],
-    });
-    await waitForSuccess(mintHash);
 
     const approveHash = await writeContractAsync({
       address: token.address,
@@ -184,8 +207,8 @@ export function useRailContracts(account: UserAccount) {
     await waitForSuccess(depositHash);
     await refreshBalances();
 
-    return { mintHash, approveHash, depositHash };
-  }, [owner, policyVault, refreshBalances, waitForSuccess, writeContractAsync]);
+    return { approveHash, depositHash };
+  }, [policyVault, refreshBalances, waitForSuccess, writeContractAsync]);
 
   const withdrawAsset = useCallback(async (asset: string, amountValue: number) => {
     if (!contractsConfigured) {
@@ -241,12 +264,14 @@ export function useRailContracts(account: UserAccount) {
     canWriteContracts: contractsConfigured && account.status === "connected",
     createPolicy,
     depositAsset,
+    fundWallet,
     isWriting: isPending,
     pausePolicy,
     refreshBalances,
     resumePolicy,
     revokePolicy,
-    tokenBalanceUSDC: typeof tokenBalance === "bigint" ? Number(formatUnits(tokenBalance, usdc.decimals)) : undefined,
+    tokenBalanceUSDC: typeof tokenBalanceUSDC === "bigint" ? Number(formatUnits(tokenBalanceUSDC, usdc.decimals)) : undefined,
+    tokenBalanceWETH: typeof tokenBalanceWETH === "bigint" ? Number(formatUnits(tokenBalanceWETH, weth.decimals)) : undefined,
     vaultBalanceUSDC: typeof vaultBalanceUSDC === "bigint" ? Number(formatUnits(vaultBalanceUSDC, usdc.decimals)) : undefined,
     vaultBalanceWETH: typeof vaultBalanceWETH === "bigint" ? Number(formatUnits(vaultBalanceWETH, weth.decimals)) : undefined,
     withdrawAsset,
